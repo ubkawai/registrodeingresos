@@ -25,16 +25,20 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
   let lastScanTimestamp = 0;
 
+  // ============================
+  // USE EFFECT
+  // ============================
   useEffect(() => {
     if (isActive && !isScanning) {
       startScanner();
     }
 
-    return () => {
-      stopScanner();
-    };
+    return () => stopScanner();
   }, [isActive]);
 
+  // ============================
+  // START SCANNER (CORREGIDO)
+  // ============================
   const startScanner = async () => {
     try {
       const hints = new Map();
@@ -45,39 +49,47 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
         BarcodeFormat.QR_CODE,
       ]);
 
-      // lector optimizado
       codeReaderRef.current = new BrowserMultiFormatReader(hints);
 
-      const devices =
-        await BrowserMultiFormatReader.listVideoInputDevices();
+      const devices = await BrowserMultiFormatReader.listVideoInputDevices();
 
-      const cameraId =
-        devices.find((d) =>
-          d.label.toLowerCase().includes("back")
-        )?.deviceId || devices[0].deviceId;
+      if (!devices.length) throw new Error("No se encontraron cámaras");
 
-      // === STREAM CON AUTOFOCUS REAL ===
+      // 📌 Selección segura de cámara (corrige labels vacíos)
+      let cameraId = devices[0].deviceId;
+
+      if (devices.length > 1) {
+        const backCam = devices.find((d) =>
+          (d.label?.toLowerCase() ?? "").includes("back") ||
+          (d.label?.toLowerCase() ?? "").includes("rear")
+        );
+        if (backCam) cameraId = backCam.deviceId;
+      }
+
+      // 📌 Stream SIN advanced (corrige error en Chrome)
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          deviceId: cameraId,
+          deviceId: cameraId ? { exact: cameraId } : undefined,
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          advanced: [{ focusMode: "continuous" }] as any,
-        } as any,
+        },
         audio: false,
       });
 
       videoRef.current!.srcObject = stream;
       trackRef.current = stream.getVideoTracks()[0];
 
-      // === ESCANEO CONTINUO ===
+      // ============================
+      // ESCANEO CONTINUO
+      // ============================
       codeReaderRef.current.decodeFromVideoDevice(
         cameraId,
         videoRef.current!,
         (result) => {
           if (result) {
             const now = Date.now();
-            if (now - lastScanTimestamp < 2000) return; // evitar duplicados
+            if (now - lastScanTimestamp < 2000) return;
+
             lastScanTimestamp = now;
 
             vibrate();
@@ -88,13 +100,16 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
       );
 
       setIsScanning(true);
-    } catch (error) {
-      console.error(error);
-      toast.error("No se pudo acceder a la cámara");
+    } catch (error: any) {
+      console.error("CAMERA ERROR:", error);
+      toast.error(`No se pudo acceder a la cámara: ${error.message}`);
       onClose();
     }
   };
 
+  // ============================
+  // STOP SCANNER
+  // ============================
   const stopScanner = async () => {
     try {
       const reader: any = codeReaderRef.current;
@@ -113,6 +128,9 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     }
   };
 
+  // ============================
+  // EFECTOS DE BEEP Y VIBRACIÓN
+  // ============================
   const playBeep = () => {
     const audio = new Audio("/beep.mp3");
     audio.volume = 0.4;
@@ -123,13 +141,16 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     if (navigator.vibrate) navigator.vibrate(120);
   };
 
+  // ============================
+  // FLASH ON/OFF
+  // ============================
   const toggleFlash = async () => {
     try {
       const track = trackRef.current;
       if (!track) return;
 
       const caps: any = track.getCapabilities();
-      if (!caps.torch) {
+      if (!caps?.torch) {
         toast.error("El dispositivo no soporta linterna");
         return;
       }
@@ -145,6 +166,9 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     }
   };
 
+  // ============================
+  // PROCESAR RESULTADO DNI
+  // ============================
   const handleScanSuccess = (text: string) => {
     try {
       let dni = "";
@@ -176,6 +200,9 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     }
   };
 
+  // ============================
+  // CERRAR SCANNER
+  // ============================
   const handleClose = async () => {
     await stopScanner();
     onClose();
@@ -183,6 +210,9 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
   if (!isActive) return null;
 
+  // ============================
+  // UI (SIN MODIFICACIONES)
+  // ============================
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       <div className="flex justify-between items-center p-4">
