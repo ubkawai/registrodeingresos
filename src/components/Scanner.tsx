@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
-import {
-  BarcodeFormat,
-  DecodeHintType,
-} from "@zxing/library";
-
 import { Camera, XCircle, Flashlight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+
+// ⬇️ IMPORTAMOS ZXING EN WASM
+import { readBarcodes, type ReaderOptions } from "zxing-wasm/reader";
 
 interface ScannerProps {
   onScanSuccess: (dni: string, fullName: string) => void;
@@ -17,140 +14,105 @@ interface ScannerProps {
 
 export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
 
   const [isScanning, setIsScanning] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
 
-  let lastScanTimestamp = 0;
+  const lastScanRef = useRef(0);
+  const loopIdRef = useRef<number | null>(null);
 
-  // ============================
-  // USE EFFECT
-  // ============================
   useEffect(() => {
     if (isActive && !isScanning) {
       startScanner();
     }
 
-    return () => stopScanner();
+    return () => {
+      stopScanner();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
-  // ============================
-  // START SCANNER (CORREGIDO)
-  // ============================
   const startScanner = async () => {
     try {
-      const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-        BarcodeFormat.PDF_417,
-        BarcodeFormat.CODE_128,
-        BarcodeFormat.CODE_39,
-        BarcodeFormat.QR_CODE,
-      ]);
-
-      codeReaderRef.current = new BrowserMultiFormatReader(hints);
-
-      const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-
-      if (!devices.length) throw new Error("No se encontraron cámaras");
-
-      // 📌 Selección segura de cámara (corrige labels vacíos)
-      let cameraId = devices[0].deviceId;
-
-      if (devices.length > 1) {
-        const backCam = devices.find((d) =>
-          (d.label?.toLowerCase() ?? "").includes("back") ||
-          (d.label?.toLowerCase() ?? "").includes("rear")
-        );
-        if (backCam) cameraId = backCam.deviceId;
-      }
-
-      // 📌 Stream SIN advanced (corrige error en Chrome)
+      // 1) Encendemos la cámara
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          deviceId: cameraId ? { exact: cameraId } : undefined,
+          facingMode: "environment",
           width: { ideal: 1280 },
           height: { ideal: 720 },
-        },
+          advanced: [{ focusMode: "continuous" } as any],
+        } as any,
         audio: false,
       });
 
-      videoRef.current!.srcObject = stream;
+      if (!videoRef.current) return;
+
+      videoRef.current.srcObject = stream;
       trackRef.current = stream.getVideoTracks()[0];
 
-      // ============================
-      // ESCANEO CONTINUO
-      // ============================
-      codeReaderRef.current.decodeFromVideoDevice(
-        cameraId,
-        videoRef.current!,
-        (result) => {
-          if (result) {
-            const now = Date.now();
-            if (now - lastScanTimestamp < 2000) return;
-
-            lastScanTimestamp = now;
-
-            vibrate();
-            playBeep();
-            handleScanSuccess(result.getText());
-          }
-        }
-      );
+      // 2) Iniciamos el loop de escaneo con WASM
+      startScanLoop();
 
       setIsScanning(true);
-    } catch (error: any) {
-      console.error("CAMERA ERROR:", error);
-      toast.error(`No se pudo acceder a la cámara: ${error.message}`);
+    } catch (error) {
+      console.error(error);
+      toast.error("No se pudo acceder a la cámara");
       onClose();
     }
   };
 
-  // ============================
-  // STOP SCANNER
-  // ============================
+  const startScanLoop = () => {
+    if (loopIdRef.current !== null) return;
+
+    const loop = async () => {
+      await scanFrameWithWasm();
+      loopIdRef.current = window.requestAnimationFrame(loop);
+    };
+
+    loopIdRef.current = window.requestAnimationFrame(loop);
+  };
+
   const stopScanner = async () => {
     try {
-      const reader: any = codeReaderRef.current;
-      if (reader?.reset) reader.reset();
-      if (reader?.stopContinuousDecode) reader.stopContinuousDecode();
+      if (loopIdRef.current !== null) {
+        window.cancelAnimationFrame(loopIdRef.current);
+        loopIdRef.current = null;
+      }
 
       if (videoRef.current?.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
       }
 
-      videoRef.current!.srcObject = null;
       setIsScanning(false);
     } catch (err) {
       console.error("Stop error:", err);
     }
   };
 
-  // ============================
-  // EFECTOS DE BEEP Y VIBRACIÓN
-  // ============================
+  // 🔔 Sonido
   const playBeep = () => {
     const audio = new Audio("/beep.mp3");
     audio.volume = 0.4;
     audio.play().catch(() => {});
   };
 
+  // 📳 Vibración
   const vibrate = () => {
     if (navigator.vibrate) navigator.vibrate(120);
   };
 
-  // ============================
-  // FLASH ON/OFF
-  // ============================
+  // 🔦 Linterna
   const toggleFlash = async () => {
     try {
       const track = trackRef.current;
       if (!track) return;
 
       const caps: any = track.getCapabilities();
-      if (!caps?.torch) {
+      if (!caps.torch) {
         toast.error("El dispositivo no soporta linterna");
         return;
       }
@@ -166,14 +128,61 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     }
   };
 
-  // ============================
-  // PROCESAR RESULTADO DNI
-  // ============================
+  // 🧠 Escaneo del frame con WASM (PDF417 principal)
+  const scanFrameWithWasm = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (video.readyState !== HTMLMediaElement.HAVE_ENOUGH_DATA) return;
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) return;
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Dibujamos el frame actual del video
+    ctx.drawImage(video, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+
+    try {
+      const options: ReaderOptions = {
+        // Nos centramos en PDF417, pero podrías agregar "QRCode" si lo necesitas
+        formats: ["PDF417"],
+        tryHarder: true,
+        maxNumberOfSymbols: 1,
+      };
+
+      const results = await readBarcodes(imageData, options);
+      if (!results || results.length === 0) return;
+
+      const now = Date.now();
+      if (now - lastScanRef.current < 1500) return; // anti-duplicados
+      lastScanRef.current = now;
+
+      const result = results[0];
+      const text = result.text;
+
+      vibrate();
+      playBeep();
+      handleScanSuccess(text);
+    } catch (err) {
+      // No hacemos toast aquí para no saturar, solo log
+      // console.error("WASM scan error:", err);
+    }
+  };
+
   const handleScanSuccess = (text: string) => {
     try {
       let dni = "";
       let fullName = "";
 
+      // Parsing del DNI peruano desde PDF417
       if (text.length >= 125) {
         dni = text.substring(2, 10).trim();
         const ap1 = text.substring(10, 50).trim();
@@ -200,9 +209,6 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     }
   };
 
-  // ============================
-  // CERRAR SCANNER
-  // ============================
   const handleClose = async () => {
     await stopScanner();
     onClose();
@@ -210,9 +216,6 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
   if (!isActive) return null;
 
-  // ============================
-  // UI (SIN MODIFICACIONES)
-  // ============================
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       <div className="flex justify-between items-center p-4">
@@ -251,6 +254,8 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
           autoPlay
           muted
         />
+        {/* Canvas oculto para procesar los frames con WASM */}
+        <canvas ref={canvasRef} className="hidden" />
       </div>
 
       <div className="p-4 text-center text-white">
