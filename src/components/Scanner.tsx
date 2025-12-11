@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 // ⬇️ IMPORTAMOS ZXING EN WASM
-import { readBarcodes, type ReaderOptions } from "zxing-wasm/reader";
+import { readBarcodes, type ReaderOptions } from "zxing-wasm";
 
 interface ScannerProps {
   onScanSuccess: (dni: string, fullName: string) => void;
