@@ -7,8 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecordsList } from "@/components/RecordsList";
 import { Auth } from "@/components/Auth";
 import { toast } from "sonner";
-import { Camera, Save, LogOut, List, X, RefreshCw, Eye, EyeOff } from "lucide-react";
-import { createWorker, Worker } from "tesseract.js";
+import { Camera, Save, LogOut, List, X } from "lucide-react";
+import { createWorker, Worker, PSM } from "tesseract.js";
 
 interface Record {
   id: string;
@@ -34,7 +34,9 @@ type FactilizaDniResponse = {
   };
 };
 
-const FACTILIZA_TOKEN = import.meta.env.VITE_FACTILIZA_TOKEN as string | undefined;
+const FACTILIZA_TOKEN = import.meta.env.VITE_FACTILIZA_TOKEN as
+  | string
+  | undefined;
 
 const Index = () => {
   const [session, setSession] = useState<any>(null);
@@ -59,29 +61,43 @@ const Index = () => {
   const [lastName, setLastName] = useState<string | null>(null);
   const [lastBirth, setLastBirth] = useState<string | null>(null);
 
-  // Debug recorte
-  const [showCropPreview, setShowCropPreview] = useState(false);
-  const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null);
-
   // Auto-scan control
   const scanningRef = useRef(false);
   const processingRef = useRef(false);
   const loopTimerRef = useRef<number | null>(null);
 
-  // Anti-dup / cooldown
+  // Anti-dup / cooldown (misma lectura repetida)
   const lastDetectedRef = useRef<string | null>(null);
   const lastDetectedAtRef = useRef<number>(0);
   const COOLDOWN_MS = 2500;
 
+  // ✅ Anti-dup REAL (no permitir duplicados en la lista)
+  const seenDnisRef = useRef<Set<string>>(new Set());
+
+  // ✅ NUEVO: anti-spam del toast "ya registrado"
+  const lastDupToastAtRef = useRef<number>(0);
+  const DUP_TOAST_COOLDOWN_MS = 2000;
+
   // OCR worker persistente
   const workerRef = useRef<Worker | null>(null);
 
-  // Beep
+  // Beep (/public/beep.wav)
   const beepRef = useRef<HTMLAudioElement | null>(null);
 
+  // ====== Sync Set con currentRecords (por si se cambia estado) ======
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const s = new Set<string>();
+    for (const r of currentRecords) s.add(r.dni_number);
+    seenDnisRef.current = s;
+  }, [currentRecords]);
+
+  useEffect(() => {
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => setSession(session));
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
 
@@ -107,22 +123,39 @@ const Index = () => {
     setSavedLists(data || []);
   };
 
-  // ================== Extract DNI (robusto) ==================
+  // ================== Extract DNI (ROBUSTO) ==================
+  // - Busca PER + 8 dígitos aunque haya ruido antes (AI<PER...)
+  // - Tolera PER mal leído (P?R / PE?)
+  // - Reemplaza letras que suelen confundirse en dígitos dentro del bloque del DNI
   const extractDni = (raw: string) => {
-    const t = (raw || "").toUpperCase().replace(/\s+/g, "");
+    let t = (raw || "").toUpperCase();
+    t = t.replace(/\s+/g, "");
+    // normalización para OCR:
+    // (en zona numérica suelen confundir O->0, I/L->1, S->5, B->8, Z->2)
+    const normalizeDigits = (s: string) =>
+      s
+        .replace(/O/g, "0")
+        .replace(/[IL]/g, "1")
+        .replace(/S/g, "5")
+        .replace(/B/g, "8")
+        .replace(/Z/g, "2");
 
-    // casos más comunes
-    let m =
-      t.match(/PER(\d{8})/) ||
-      t.match(/PER[<]*?(\d{8})/) ||
-      t.match(/P[A-Z]R(\d{8})/) ||
-      t.match(/PE[A-Z](\d{8})/);
+    // 1) PER + 8
+    let m = t.match(/PER[<]*([0-9OILSBZ]{8})/);
+    if (m?.[1]) return normalizeDigits(m[1]);
 
-    if (m?.[1]) return m[1];
+    // 2) tolerancias: P?R + 8 / PE? + 8
+    m = t.match(/P[A-Z]R[<]*([0-9OILSBZ]{8})/);
+    if (m?.[1]) return normalizeDigits(m[1]);
 
-    // fallback: primer bloque de 8 dígitos si existe (último recurso)
-    m = t.match(/(\d{8})/);
-    return m?.[1] ?? "";
+    m = t.match(/PE[A-Z][<]*([0-9OILSBZ]{8})/);
+    if (m?.[1]) return normalizeDigits(m[1]);
+
+    // 3) último recurso: cualquier bloque de 8
+    m = t.match(/([0-9OILSBZ]{8})/);
+    if (m?.[1]) return normalizeDigits(m[1]);
+
+    return "";
   };
 
   // ================== Worker init/destroy ==================
@@ -133,8 +166,8 @@ const Index = () => {
     await w.setParameters({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<",
       preserve_interword_spaces: "1",
-      // PSM 6 = bloque de texto; suele ir bien para MRZ
-      tessedit_pageseg_mode: "6",
+      // ✅ en tesseract.js/TS, PSM debe ser enum, no string/numero
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
     });
 
     workerRef.current = w;
@@ -155,16 +188,14 @@ const Index = () => {
         beepRef.current = new Audio("/beep.wav");
         beepRef.current.preload = "auto";
       }
-      // “unlock”: play muy corto (puede fallar silenciosamente, ok)
+      // unlock en móviles (puede fallar, ok)
       beepRef.current.volume = 0.001;
       beepRef.current.currentTime = 0;
       await beepRef.current.play();
       beepRef.current.pause();
       beepRef.current.volume = 1;
       beepRef.current.currentTime = 0;
-    } catch {
-      // si el navegador no lo permite, igual luego a veces suena cuando ya hubo interacción
-    }
+    } catch {}
   };
 
   const playBeep = async () => {
@@ -191,7 +222,7 @@ const Index = () => {
       lastDetectedAtRef.current = 0;
 
       setShowCamera(true);
-      await new Promise((r) => setTimeout(r, 80)); // deja que renderice video + overlay
+      await new Promise((r) => setTimeout(r, 80)); // deja renderizar video + overlay
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -226,9 +257,10 @@ const Index = () => {
       await ensureBeepUnlocked();
       setOcrLoading(false);
 
-      // ✅ iniciar loop automático
       startAutoScan();
-      toast.success("Escaneo automático activo. Alinea el MRZ en la franja verde.");
+      toast.success(
+        "Escaneo automático activo. Alinea el MRZ en la franja verde."
+      );
     } catch (err: any) {
       console.error(err);
       setShowCamera(false);
@@ -236,8 +268,10 @@ const Index = () => {
       const name = err?.name || "";
       if (name === "NotAllowedError") toast.error("Permiso de cámara denegado.");
       else if (name === "NotFoundError") toast.error("No se encontró cámara.");
-      else if (name === "NotReadableError") toast.error("La cámara está siendo usada por otra app.");
-      else if (name === "SecurityError") toast.error("La cámara requiere HTTPS (o localhost).");
+      else if (name === "NotReadableError")
+        toast.error("La cámara está siendo usada por otra app.");
+      else if (name === "SecurityError")
+        toast.error("La cámara requiere HTTPS (o localhost).");
       else toast.error("No se pudo abrir la cámara. Revisa permisos o HTTPS.");
     }
   };
@@ -258,22 +292,17 @@ const Index = () => {
     await destroyWorker();
   };
 
-  // ================== AutoScan loop (setTimeout) ==================
+  // ================== AutoScan loop ==================
   const startAutoScan = () => {
     stopAutoScan();
     scanningRef.current = true;
 
     const loop = async () => {
       if (!scanningRef.current) return;
-
-      // ejecuta tick
       await scanTick();
-
-      // reprograma
-      loopTimerRef.current = window.setTimeout(loop, 850); // 700–1200 recomendado
+      loopTimerRef.current = window.setTimeout(loop, 850);
     };
 
-    // espera un poquito para que overlay tenga medidas correctas
     loopTimerRef.current = window.setTimeout(loop, 400);
   };
 
@@ -289,7 +318,8 @@ const Index = () => {
   const scanTick = async () => {
     if (processingRef.current) return;
     if (!workerRef.current) return;
-    if (!videoRef.current || !containerRef.current || !mrzOverlayRef.current) return;
+    if (!videoRef.current || !containerRef.current || !mrzOverlayRef.current)
+      return;
 
     const video = videoRef.current;
     const vw = video.videoWidth;
@@ -297,6 +327,8 @@ const Index = () => {
     if (!vw || !vh) return;
 
     const now = Date.now();
+
+    // cooldown contra el mismo DNI repetido
     if (
       lastDetectedRef.current &&
       now - lastDetectedAtRef.current < COOLDOWN_MS
@@ -307,7 +339,6 @@ const Index = () => {
     processingRef.current = true;
 
     try {
-      // DOM rects
       const containerRect = containerRef.current.getBoundingClientRect();
       const mrzRect = mrzOverlayRef.current.getBoundingClientRect();
 
@@ -319,15 +350,15 @@ const Index = () => {
       const scaleX = vw / containerRect.width;
       const scaleY = vh / containerRect.height;
 
-      // ✅ recorte más GRANDE para no cortar "PER"
       let cropX = Math.floor(relX * scaleX);
       let cropY = Math.floor(relY * scaleY);
       let cropW = Math.floor(relW * scaleX);
       let cropH = Math.floor(relH * scaleY);
 
-      const extraX = Math.floor(cropW * 0.10);
-      const extraTop = Math.floor(cropH * 0.45);
-      const extraBottom = Math.floor(cropH * 0.45);
+      // ✅ agranda el recorte para no cortar "PER" ni la 1ra línea
+      const extraX = Math.floor(cropW * 0.14);
+      const extraTop = Math.floor(cropH * 0.75); // sube bastante para incluir línea donde aparece PER
+      const extraBottom = Math.floor(cropH * 0.25);
 
       cropX = Math.max(0, cropX - extraX);
       cropW = Math.min(vw - cropX, cropW + extraX * 2);
@@ -344,18 +375,7 @@ const Index = () => {
 
       ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-      // Debug preview (color)
-      if (showCropPreview) {
-        const colorBlob = await new Promise<Blob | null>((resolve) =>
-          cropCanvas.toBlob(resolve, "image/jpeg", 0.95)
-        );
-        if (colorBlob) {
-          if (cropPreviewUrl) URL.revokeObjectURL(cropPreviewUrl);
-          setCropPreviewUrl(URL.createObjectURL(colorBlob));
-        }
-      }
-
-      // ✅ PASADA 1: OCR sobre imagen a color (mejor para PER)
+      // PASADA 1 (color)
       const colorBlob = await new Promise<Blob | null>((resolve) =>
         cropCanvas.toBlob(resolve, "image/jpeg", 0.95)
       );
@@ -370,7 +390,7 @@ const Index = () => {
         return;
       }
 
-      // ✅ PASADA 2: binarizado + upscale (solo si falla la primera)
+      // PASADA 2 (enhance)
       const up = 2;
       const enhanced = document.createElement("canvas");
       enhanced.width = cropW * up;
@@ -385,9 +405,11 @@ const Index = () => {
       const img = ectx.getImageData(0, 0, enhanced.width, enhanced.height);
       const d = img.data;
 
-      const TH = 140;
+      const TH = 150;
       for (let i = 0; i < d.length; i += 4) {
-        const r = d[i], g = d[i + 1], b = d[i + 2];
+        const r = d[i],
+          g = d[i + 1],
+          b = d[i + 2];
         const gray = 0.299 * r + 0.587 * g + 0.114 * b;
         const v = gray > TH ? 255 : 0;
         d[i] = d[i + 1] = d[i + 2] = v;
@@ -436,7 +458,11 @@ const Index = () => {
 
       const nombre =
         json.data.nombre_completo ||
-        [json.data.apellido_paterno, json.data.apellido_materno, json.data.nombres]
+        [
+          json.data.apellido_paterno,
+          json.data.apellido_materno,
+          json.data.nombres,
+        ]
           .filter(Boolean)
           .join(" ")
           .trim() ||
@@ -451,43 +477,64 @@ const Index = () => {
     }
   };
 
-  // ================== Detectado: beep + api + agrega ==================
-  const onDniDetected = async (dni: string) => {
-    const now = Date.now();
-    lastDetectedRef.current = dni;
-    lastDetectedAtRef.current = now;
+  // ================== Detectado: anti-dup + beep + api + agrega ==================
+  // ================== Detectado: anti-dup + beep + api + agrega ==================
+const onDniDetected = async (dni: string) => {
+  const now = Date.now();
 
-    if (currentRecords.some((r) => r.dni_number === dni)) {
-      toast.info("DNI ya registrado en la lista actual.");
-      return;
+  lastDetectedRef.current = dni;
+  lastDetectedAtRef.current = now;
+
+  // ✅ DNI ya registrado -> mostrar mensaje
+  if (seenDnisRef.current.has(dni)) {
+    if (now - lastDupToastAtRef.current > DUP_TOAST_COOLDOWN_MS) {
+      toast.warning(`DNI ya registrado: ${dni}`);
+      lastDupToastAtRef.current = now;
     }
+    return;
+  }
 
-    setOcrLoading(true);
-    await playBeep();
+  // “reserva” el dni para evitar duplicado mientras consulta API
+  seenDnisRef.current.add(dni);
 
-    const { nombre, fechaNac } = await fetchFromApi(dni);
+  setOcrLoading(true);
+  await playBeep();
 
-    setLastDni(dni);
-    setLastName(nombre);
-    setLastBirth(fechaNac);
+  const { nombre, fechaNac } = await fetchFromApi(dni);
 
-    setCurrentRecords((prev) => [
+  setLastDni(dni);
+  setLastName(nombre);
+  setLastBirth(fechaNac);
+
+  // ✅ SOLO validar "No disponible" (fecha puede venir vacía y está OK)
+  const nombreOk = !!nombre && nombre.trim() !== "" && nombre !== "No disponible";
+  if (!nombreOk) {
+    // permite reintentar si el API falló
+    seenDnisRef.current.delete(dni);
+
+    setOcrLoading(false);
+    toast.error("No disponible: no se agregará a la lista.");
+    return;
+  }
+
+  setCurrentRecords((prev) => {
+    if (prev.some((r) => r.dni_number === dni)) return prev;
+    return [
       ...prev,
       {
         id: crypto.randomUUID(),
         dni_number: dni,
-        full_name: nombre || "No disponible",
+        full_name: nombre,
         scanned_at: new Date().toISOString(),
-        birth_date: fechaNac || "",
+        birth_date: fechaNac || "", // puede ser vacío y no pasa nada
       },
-    ]);
+    ];
+  });
 
-    setOcrLoading(false);
-    toast.success(`Agregado: ${dni}`);
+  setOcrLoading(false);
+  toast.success(`Agregado: ${dni}`);
+};
 
-    // ✅ si quieres seguir escaneando sin cerrar, COMENTA estas líneas:
-    // await closeCamera();
-  };
 
   // ================== Guardar lista ==================
   const handleSaveList = async () => {
@@ -525,6 +572,10 @@ const Index = () => {
       toast.success("Lista guardada");
       setCurrentRecords([]);
       setListTitle("");
+
+      // ✅ limpia también el set de duplicados para una nueva lista
+      seenDnisRef.current = new Set();
+
       await loadSavedLists();
     } catch (e: any) {
       console.error(e);
@@ -556,15 +607,14 @@ const Index = () => {
         <>
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Nueva Lista</CardTitle>
+              <CardTitle>Titulo de la Lista</CardTitle>
             </CardHeader>
 
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="title">Título de la lista</Label>
                 <Input
                   id="title"
-                  placeholder="Ej: Asistencia 18/11/2025"
+                  placeholder="Asistencia 18/11/2025"
                   value={listTitle}
                   onChange={(e) => setListTitle(e.target.value)}
                 />
@@ -573,91 +623,56 @@ const Index = () => {
               <div className="flex gap-2 flex-wrap">
                 <Button onClick={openCamera} disabled={ocrLoading}>
                   <Camera className="w-4 h-4 mr-2" />
-                  Abrir cámara (auto)
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowCropPreview((v) => !v)}
-                >
-                  {showCropPreview ? (
-                    <>
-                      <EyeOff className="w-4 h-4 mr-2" /> Ocultar recorte
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-4 h-4 mr-2" /> Ver recorte MRZ
-                    </>
-                  )}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    lastDetectedRef.current = null;
-                    lastDetectedAtRef.current = 0;
-                    toast.info("Listo. Continúa alineando el MRZ.");
-                  }}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Reset
+                  Abrir cámara
                 </Button>
               </div>
 
               {showCamera && (
-                <div className="space-y-2">
-                  <div ref={containerRef} className="relative w-full overflow-hidden rounded-lg border">
-                    <video ref={videoRef} className="w-full" autoPlay muted playsInline />
-
-                    <div className="pointer-events-none absolute inset-0">
-                      <div className="absolute inset-0 bg-black/35" />
-
-                      <div
-                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-                                  w-[90%] max-w-[520px] aspect-[1.6/1] rounded-xl
-                                  border-2 border-white/80 bg-transparent shadow-[0_0_0_2000px_rgba(0,0,0,0.35)]"
+                <div className="space-y-3">
+                  <div className="w-full bg-black rounded-xl p-4 flex items-center justify-center">
+                    <div
+                      ref={containerRef}
+                      className="relative w-[92vw] max-w-[520px] aspect-[1.6/1] rounded-xl border-2 border-white/80 overflow-hidden"
+                    >
+                      <video
+                        ref={videoRef}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        autoPlay
+                        muted
+                        playsInline
                       />
 
                       <div
                         ref={mrzOverlayRef}
-                        className="absolute left-1/2 top-1/2 -translate-x-1/2 translate-y-[22%]
-                                  w-[90%] max-w-[520px] h-[26%] rounded-lg
-                                  border-2 border-emerald-300/90 bg-emerald-300/10"
+                        className="absolute left-1/2 bottom-[10%] -translate-x-1/2
+                                   w-[92%] h-[22%] rounded-lg
+                                   border-2 border-emerald-300/90 bg-emerald-300/10"
                       />
 
-                      <div className="absolute bottom-3 left-0 right-0 text-center text-white text-sm drop-shadow">
-                        Escaneo automático activo. Alinea el MRZ COMPLETO (incluye PER + 8 dígitos).
+                      <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs drop-shadow">
+                        Escaneo automático activo. Alinea el MRZ COMPLETO (PER + 8
+                        dígitos).
                       </div>
                     </div>
                   </div>
 
-                  <Button variant="outline" onClick={closeCamera} className="w-full">
+                  <Button
+                    variant="outline"
+                    onClick={closeCamera}
+                    className="w-full"
+                  >
                     <X className="w-4 h-4 mr-2" />
                     Cerrar cámara
                   </Button>
                 </div>
               )}
 
-              {showCropPreview && cropPreviewUrl && (
-                <Card className="border-emerald-300/40">
-                  <CardHeader>
-                    <CardTitle>Vista previa del recorte MRZ (debug)</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <img src={cropPreviewUrl} alt="MRZ crop preview" className="w-full rounded-md border" />
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Aquí debe verse claramente <b>PER</b> y los <b>8 dígitos</b>.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
               {(lastDni || ocrLoading) && (
                 <Card className="border-primary/30">
                   <CardHeader>
-                    <CardTitle>{ocrLoading ? "Consultando…" : "Última lectura"}</CardTitle>
+                    <CardTitle>
+                      {ocrLoading ? "Consultando…" : "Última lectura"}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="space-y-2">
@@ -668,10 +683,10 @@ const Index = () => {
                       <Label>Nombre completo</Label>
                       <Input value={lastName ?? ""} readOnly />
                     </div>
-                    <div className="space-y-2">
+                    {/*<div className="space-y-2">
                       <Label>Fecha de nacimiento</Label>
                       <Input value={lastBirth ?? ""} readOnly />
-                    </div>
+                    </div>*/}
                   </CardContent>
                 </Card>
               )}
@@ -696,14 +711,22 @@ const Index = () => {
             </CardContent>
           </Card>
 
-          <Button variant="outline" className="w-full mt-4" onClick={() => setShowSavedLists(true)}>
+          <Button
+            variant="outline"
+            className="w-full mt-4"
+            onClick={() => setShowSavedLists(true)}
+          >
             <List className="w-4 h-4 mr-2" />
             Ver listas guardadas ({savedLists.length})
           </Button>
         </>
       ) : (
         <>
-          <Button variant="outline" className="mb-4" onClick={() => setShowSavedLists(false)}>
+          <Button
+            variant="outline"
+            className="mb-4"
+            onClick={() => setShowSavedLists(false)}
+          >
             Volver
           </Button>
 
