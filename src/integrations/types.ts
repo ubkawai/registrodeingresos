@@ -14,22 +14,88 @@ export type Database = {
   }
   public: {
     Tables: {
-      scan_lists: {
+      acampantes: {
+        Row: {
+          apellido_materno: string | null
+          apellido_paterno: string | null
+          created_at: string
+          dni: string
+          fecha_nacimiento: string | null
+          fuente: string
+          nombre_completo: string
+          nombres: string | null
+          updated_at: string
+        }
+        Insert: {
+          apellido_materno?: string | null
+          apellido_paterno?: string | null
+          created_at?: string
+          dni: string
+          fecha_nacimiento?: string | null
+          fuente?: string
+          nombre_completo: string
+          nombres?: string | null
+          updated_at?: string
+        }
+        Update: {
+          apellido_materno?: string | null
+          apellido_paterno?: string | null
+          created_at?: string
+          dni?: string
+          fecha_nacimiento?: string | null
+          fuente?: string
+          nombre_completo?: string
+          nombres?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
         Row: {
           created_at: string
+          email: string
           id: string
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id: string
+          role?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          role?: string
+        }
+        Relationships: []
+      }
+      scan_lists: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          id: string
+          padron: Json | null
+          padron_archivo: string | null
           title: string
           user_id: string
         }
         Insert: {
+          closed_at?: string | null
           created_at?: string
           id?: string
+          padron?: Json | null
+          padron_archivo?: string | null
           title: string
           user_id: string
         }
         Update: {
+          closed_at?: string | null
           created_at?: string
           id?: string
+          padron?: Json | null
+          padron_archivo?: string | null
           title?: string
           user_id?: string
         }
@@ -38,6 +104,7 @@ export type Database = {
       scanned_records: {
         Row: {
           dni_number: string
+          fuente: string | null
           full_name: string
           id: string
           scan_list_id: string
@@ -46,6 +113,7 @@ export type Database = {
         }
         Insert: {
           dni_number: string
+          fuente?: string | null
           full_name: string
           id?: string
           scan_list_id: string
@@ -54,6 +122,7 @@ export type Database = {
         }
         Update: {
           dni_number?: string
+          fuente?: string | null
           full_name?: string
           id?: string
           scan_list_id?: string

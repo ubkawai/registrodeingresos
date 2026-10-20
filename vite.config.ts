@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0", // Escucha en todas las interfaces de red
     port: 3000,
     strictPort: true,
+    allowedHosts: [".trycloudflare.com"], // Acceso remoto vía túnel de Cloudflare
   },
   preview: {
     host: "0.0.0.0", // Para el preview también
