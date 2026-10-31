@@ -40,13 +40,20 @@ export const Auth = () => {
       {/* Letrero de entrada */}
       <div className="flex flex-col justify-between bg-primary px-6 py-6 text-primary-foreground lg:w-[44%] lg:px-12 lg:py-12">
         <Tent className="h-7 w-7" strokeWidth={2.25} />
-        <div className="mt-8 lg:mt-0">
+        <div className="mt-8 text-center lg:mt-0">
+          {/* Ícono: Microsoft Fluent Emoji "Desert island" 3D (licencia MIT) */}
+          <img
+            src="/isla.png"
+            alt=""
+            className="mx-auto mb-4 h-20 w-20 drop-shadow-lg lg:h-28 lg:w-28"
+          />
           <h1 className="font-sign text-5xl font-extrabold leading-[0.9] lg:text-7xl">
             Registro de Acampantes
           </h1>
-          <p className="mt-4 max-w-xs text-base text-primary-foreground/75">
+          {/*<p className="mt-4 max-w-xs text-base text-primary-foreground/75">
             Control de ingreso con lector de DNI y lista de invitados.
-          </p>
+          </p>*/}
+          
         </div>
         <p className="hidden text-sm text-primary-foreground/60 lg:block">
           ¿No tienes cuenta? Pídela al administrador.
@@ -57,9 +64,7 @@ export const Auth = () => {
         <form onSubmit={handleSignIn} className="w-full max-w-sm space-y-5">
           <div>
             <h2 className="font-sign text-3xl font-bold">Inicia sesión</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Usa la cuenta que te dio el administrador.
-            </p>
+           
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="signin-email" className="text-sm font-medium">
