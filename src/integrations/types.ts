@@ -50,6 +50,147 @@ export type Database = {
         }
         Relationships: []
       }
+      empleador: {
+        Row: {
+          id: boolean
+          razon_social: string
+          ruc: string
+          tolerancia_min: number
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          razon_social?: string
+          ruc?: string
+          tolerancia_min?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          razon_social?: string
+          ruc?: string
+          tolerancia_min?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      jornadas: {
+        Row: {
+          created_at: string
+          dni: string
+          entrada_at: string
+          fecha: string
+          id: string
+          programada_fin: string | null
+          programada_inicio: string | null
+          refrigerio_min: number
+          tolerancia_min: number
+          turno_id: string | null
+          turno_nombre: string | null
+        }
+        Insert: {
+          created_at?: string
+          dni: string
+          entrada_at: string
+          fecha: string
+          id?: string
+          programada_fin?: string | null
+          programada_inicio?: string | null
+          refrigerio_min?: number
+          tolerancia_min?: number
+          turno_id?: string | null
+          turno_nombre?: string | null
+        }
+        Update: {
+          created_at?: string
+          dni?: string
+          entrada_at?: string
+          fecha?: string
+          id?: string
+          programada_fin?: string | null
+          programada_inicio?: string | null
+          refrigerio_min?: number
+          tolerancia_min?: number
+          turno_id?: string | null
+          turno_nombre?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jornadas_dni_fkey"
+            columns: ["dni"]
+            isOneToOne: false
+            referencedRelation: "trabajadores"
+            referencedColumns: ["dni"]
+          },
+          {
+            foreignKeyName: "jornadas_turno_id_fkey"
+            columns: ["turno_id"]
+            isOneToOne: false
+            referencedRelation: "turnos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marcas: {
+        Row: {
+          anulada_at: string | null
+          anulada_motivo: string | null
+          anulada_por: string | null
+          created_at: string
+          dni: string
+          id: string
+          jornada_id: string
+          marcado_at: string
+          motivo: string | null
+          origen: string
+          registrado_por: string
+          tipo: string
+        }
+        Insert: {
+          anulada_at?: string | null
+          anulada_motivo?: string | null
+          anulada_por?: string | null
+          created_at?: string
+          dni: string
+          id?: string
+          jornada_id: string
+          marcado_at?: string
+          motivo?: string | null
+          origen?: string
+          registrado_por: string
+          tipo: string
+        }
+        Update: {
+          anulada_at?: string | null
+          anulada_motivo?: string | null
+          anulada_por?: string | null
+          created_at?: string
+          dni?: string
+          id?: string
+          jornada_id?: string
+          marcado_at?: string
+          motivo?: string | null
+          origen?: string
+          registrado_por?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marcas_jornada_id_fkey"
+            columns: ["jornada_id"]
+            isOneToOne: false
+            referencedRelation: "jornadas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marcas_dni_fkey"
+            columns: ["dni"]
+            isOneToOne: false
+            referencedRelation: "trabajadores"
+            referencedColumns: ["dni"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -139,12 +280,101 @@ export type Database = {
           },
         ]
       }
+      trabajadores: {
+        Row: {
+          activo: boolean
+          area: string | null
+          cargo: string | null
+          created_at: string
+          dni: string
+          nombre_completo: string
+          turno_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          activo?: boolean
+          area?: string | null
+          cargo?: string | null
+          created_at?: string
+          dni: string
+          nombre_completo: string
+          turno_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          activo?: boolean
+          area?: string | null
+          cargo?: string | null
+          created_at?: string
+          dni?: string
+          nombre_completo?: string
+          turno_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trabajadores_turno_id_fkey"
+            columns: ["turno_id"]
+            isOneToOne: false
+            referencedRelation: "turnos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      turnos: {
+        Row: {
+          activo: boolean
+          created_at: string
+          hora_fin: string
+          hora_inicio: string
+          id: string
+          nombre: string
+          refrigerio_min: number
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          hora_fin: string
+          hora_inicio: string
+          id?: string
+          nombre: string
+          refrigerio_min?: number
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          hora_fin?: string
+          hora_inicio?: string
+          id?: string
+          nombre?: string
+          refrigerio_min?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      anular_marca: {
+        Args: { p_id: string; p_motivo: string }
+        Returns: undefined
+      }
+      es_rrhh: { Args: Record<PropertyKey, never>; Returns: boolean }
+      marcar_asistencia: {
+        Args: { p_dni: string; p_tipo?: string }
+        Returns: Json
+      }
+      mi_rol: { Args: Record<PropertyKey, never>; Returns: string }
+      registrar_marca_manual: {
+        Args: {
+          p_dni: string
+          p_marcado_at: string
+          p_motivo: string
+          p_tipo: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

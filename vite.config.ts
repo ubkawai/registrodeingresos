@@ -7,13 +7,13 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0", // Escucha en todas las interfaces de red
-    port: 3000,
+    port: 5173,
     strictPort: true,
     allowedHosts: [".trycloudflare.com"], // Acceso remoto vía túnel de Cloudflare
   },
   preview: {
     host: "0.0.0.0", // Para el preview también
-    port: 3000,
+    port: 4173,
     strictPort: true,
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

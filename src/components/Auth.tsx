@@ -36,56 +36,69 @@ export const Auth = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-foreground text-background">
-            <Tent className="h-5 w-5" />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Registro de Acampantes</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Inicia sesión para continuar
+    <div className="flex min-h-screen flex-col bg-background lg:flex-row">
+      {/* Letrero de entrada */}
+      <div className="flex flex-col justify-between bg-primary px-6 py-6 text-primary-foreground lg:w-[44%] lg:px-12 lg:py-12">
+        <Tent className="h-7 w-7" strokeWidth={2.25} />
+        <div className="mt-8 lg:mt-0">
+          <h1 className="font-sign text-5xl font-extrabold leading-[0.9] lg:text-7xl">
+            Registro de Acampantes
+          </h1>
+          <p className="mt-4 max-w-xs text-base text-primary-foreground/75">
+            Control de ingreso con lector de DNI y lista de invitados.
           </p>
         </div>
+        <p className="hidden text-sm text-primary-foreground/60 lg:block">
+          ¿No tienes cuenta? Pídela al administrador.
+        </p>
+      </div>
 
-        <form onSubmit={handleSignIn} className="space-y-4">
+      <div className="flex flex-1 items-start justify-center px-6 py-8 lg:items-center lg:py-10">
+        <form onSubmit={handleSignIn} className="w-full max-w-sm space-y-5">
+          <div>
+            <h2 className="font-sign text-3xl font-bold">Inicia sesión</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Usa la cuenta que te dio el administrador.
+            </p>
+          </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signin-email" className="text-xs text-muted-foreground">
+            <Label htmlFor="signin-email" className="text-sm font-medium">
               Correo electrónico
             </Label>
             <Input
               id="signin-email"
               type="email"
+              autoComplete="email"
               placeholder="tu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="h-11 rounded-xl"
+              className="h-12 rounded-md border-2 bg-card text-base focus-visible:border-primary focus-visible:ring-0 focus-visible:ring-offset-0"
               required
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signin-password" className="text-xs text-muted-foreground">
+            <Label htmlFor="signin-password" className="text-sm font-medium">
               Contraseña
             </Label>
             <Input
               id="signin-password"
               type="password"
+              autoComplete="current-password"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="h-11 rounded-xl"
+              className="h-12 rounded-md border-2 bg-card text-base focus-visible:border-primary focus-visible:ring-0 focus-visible:ring-offset-0"
               required
             />
           </div>
-          <Button type="submit" className="h-11 w-full rounded-xl" disabled={loading}>
+          <Button type="submit" className="h-12 w-full rounded-md text-base" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Iniciar sesión
           </Button>
+          <p className="text-center text-sm text-muted-foreground lg:hidden">
+            ¿No tienes cuenta? Pídela al administrador.
+          </p>
         </form>
-
-        <p className="mt-8 text-center text-xs text-muted-foreground">
-          ¿No tienes cuenta? Pídela al administrador.
-        </p>
       </div>
     </div>
   );

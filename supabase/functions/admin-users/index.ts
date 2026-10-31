@@ -9,6 +9,9 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const ROLES = ["admin", "usuario", "rrhh", "kiosko"];
+const toRole = (r: unknown) => (ROLES.includes(r as string) ? (r as string) : "usuario");
+
 // Errores de negocio con 200 para que el cliente pueda leer el mensaje
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -77,7 +80,7 @@ Deno.serve(async (req) => {
       case "create": {
         const email = String(body.email ?? "").trim().toLowerCase();
         const password = String(body.password ?? "");
-        const role = body.role === "admin" ? "admin" : "usuario";
+        const role = toRole(body.role);
         if (!email.includes("@")) return reply({ error: "Correo no válido" });
         if (password.length < 6) {
           return reply({ error: "La contraseña debe tener al menos 6 caracteres" });
@@ -115,7 +118,7 @@ Deno.serve(async (req) => {
 
       case "set_role": {
         if (isSelf) return reply({ error: "No puedes cambiar tu propio rol" });
-        const role = body.role === "admin" ? "admin" : "usuario";
+        const role = toRole(body.role);
         const { error } = await admin.from("profiles").update({ role }).eq("id", id);
         if (error) throw error;
         return reply({ ok: true });
@@ -140,6 +143,16 @@ Deno.serve(async (req) => {
         if (count) {
           return reply({
             error: `Esta cuenta tiene ${count} ${count === 1 ? "lista" : "listas"}. Desactívala en lugar de eliminarla.`,
+          });
+        }
+        // Las marcas de asistencia guardan quién las registró (se conservan 5 años)
+        const { count: marcas } = await admin
+          .from("marcas")
+          .select("id", { count: "exact", head: true })
+          .or(`registrado_por.eq.${id},anulada_por.eq.${id}`);
+        if (marcas) {
+          return reply({
+            error: "Esta cuenta registró marcas de asistencia. Desactívala en lugar de eliminarla.",
           });
         }
         const { error } = await admin.auth.admin.deleteUser(id);

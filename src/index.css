@@ -2,45 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Sistema de diseño: colores en HSL. Neutro y minimalista; el color se
-   reserva para estados (éxito, aviso, error) y el origen API. */
+/* Sistema de diseño "control de puerta": señalética de campamento.
+   Pino como color de marca, fondo lona y colores de estado fuertes
+   (verde = en la lista, rojo = fuera, ámbar = repetido) que se leen
+   de un vistazo, incluso al aire libre. Colores en HSL. */
 
 @layer base {
   :root {
-    --background:0 0% 98.5%;
-    --foreground:240 10% 9%;
+    --background: 90 17% 95%; /* lona #F2F4EF */
+    --foreground: 144 18% 11%; /* tinta #17211B */
 
-    --card:0 0% 100%;
-    --card-foreground:240 10% 9%;
+    --card: 80 23% 98.5%;
+    --card-foreground: 144 18% 11%;
 
-    --popover:0 0% 100%;
-    --popover-foreground:240 10% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 144 18% 11%;
 
-    --primary:240 10% 9%;
-    --primary-foreground:0 0% 100%;
+    --primary: 155 41% 16%; /* pino #183A2C */
+    --primary-foreground: 90 30% 97%;
 
-    --secondary:240 5% 95%;
-    --secondary-foreground:240 10% 9%;
+    --secondary: 96 13% 90%;
+    --secondary-foreground: 144 18% 11%;
 
-    --muted:240 5% 95.5%;
-    --muted-foreground:240 4% 46%;
+    --muted: 96 13% 90%;
+    --muted-foreground: 138 6% 37%;
 
-    --accent:221 83% 53%;
-    --accent-foreground:0 0% 100%;
+    --accent: 200 50% 35%; /* origen API */
+    --accent-foreground: 0 0% 100%;
 
-    --destructive:0 72% 51%;
-    --destructive-foreground:0 0% 100%;
+    --destructive: 4 63% 47%; /* rojo alto #C8372D */
+    --destructive-foreground: 0 0% 100%;
 
-    --border:240 6% 91%;
-    --input:240 6% 89%;
-    --ring:240 10% 9%;
+    --border: 96 12% 84%;
+    --input: 96 12% 80%;
+    --ring: 155 41% 16%;
 
-    --scanner-bg: 210 100% 8%;
-    --scanner-overlay: 210 85% 45%;
-    --success:152 62% 38%;
-    --warning:36 92% 50%;
+    --scanner-bg: 155 41% 8%;
+    --scanner-overlay: 145 65% 40%;
+    --success: 145 65% 33%; /* verde paso #1D8A4B */
+    --warning: 42 90% 45%; /* ámbar #D99A0B */
 
-    --radius:0.75rem;
+    --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -53,38 +55,38 @@
   }
 
   .dark {
-    --background:240 8% 5%;
-    --foreground:0 0% 96%;
+    --background: 155 30% 6%;
+    --foreground: 90 20% 94%;
 
-    --card:240 6% 8%;
-    --card-foreground:0 0% 96%;
+    --card: 155 25% 9%;
+    --card-foreground: 90 20% 94%;
 
-    --popover:240 6% 8%;
-    --popover-foreground:0 0% 96%;
+    --popover: 155 25% 9%;
+    --popover-foreground: 90 20% 94%;
 
-    --primary:0 0% 96%;
-    --primary-foreground:240 10% 6%;
+    --primary: 145 45% 70%;
+    --primary-foreground: 155 41% 10%;
 
-    --secondary:240 5% 14%;
-    --secondary-foreground:0 0% 96%;
+    --secondary: 155 15% 15%;
+    --secondary-foreground: 90 20% 94%;
 
-    --muted:240 5% 13%;
-    --muted-foreground:240 5% 62%;
+    --muted: 155 15% 14%;
+    --muted-foreground: 120 8% 64%;
 
-    --accent:217 91% 62%;
-    --accent-foreground:240 10% 6%;
+    --accent: 200 60% 62%;
+    --accent-foreground: 155 41% 8%;
 
-    --destructive:0 70% 55%;
-    --destructive-foreground:0 0% 100%;
+    --destructive: 4 70% 56%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border:240 5% 16%;
-    --input:240 5% 18%;
-    --ring:0 0% 96%;
+    --border: 155 12% 18%;
+    --input: 155 12% 22%;
+    --ring: 145 45% 70%;
 
-    --scanner-bg: 210 100% 8%;
-    --scanner-overlay: 210 85% 55%;
-    --success:152 55% 48%;
-    --warning:36 92% 58%;
+    --scanner-bg: 155 41% 6%;
+    --scanner-overlay: 145 55% 50%;
+    --success: 145 55% 46%;
+    --warning: 42 90% 55%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -103,13 +105,43 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-feature-settings: "ss01", "cv11";
+    font-family: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-stretch: 100%;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
 
 @layer utilities {
   .tabular-nums {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Letra de letrero: Archivo estrecha para nombres y títulos */
+  .font-sign {
+    font-stretch: 72%;
+    letter-spacing: -0.005em;
+  }
+
+  .font-narrow {
+    font-stretch: 85%;
+  }
+
+  /* Cifras del DNI: espaciadas para leerlas y dictarlas en grupos */
+  .dni {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.08em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

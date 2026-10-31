@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, XCircle, Flashlight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { extractDniFromBarcode } from "@/lib/dni";
 
 // ⬇️ IMPORTAMOS ZXING EN WASM
 import { readBarcodes, type ReaderOptions } from "zxing-wasm";
@@ -152,8 +153,18 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
     try {
       const options: ReaderOptions = {
-        // Nos centramos en PDF417, pero podrías agregar "QRCode" si lo necesitas
-        formats: ["PDF417"],
+        // PDF417 del reverso del DNI y el código de barras lineal con el número
+        formats: [
+          "PDF417",
+          "Code128",
+          "Code39",
+          "Code93",
+          "ITF",
+          "Codabar",
+          "EAN-13",
+          "QRCode",
+          "DataMatrix",
+        ],
         tryHarder: true,
         maxNumberOfSymbols: 1,
       };
@@ -167,6 +178,10 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
       const result = results[0];
       const text = result.text;
+
+      // Un código que no trae un DNI (p. ej. otro código del carné) se ignora
+      // y se sigue buscando.
+      if (!extractDniFromBarcode(text)) return;
 
       vibrate();
       playBeep();
@@ -183,15 +198,13 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
       let fullName = "";
 
       // Parsing del DNI peruano desde PDF417
+      dni = extractDniFromBarcode(text);
       if (text.length >= 125) {
-        dni = text.substring(2, 10).trim();
         const ap1 = text.substring(10, 50).trim();
         const ap2 = text.substring(50, 90).trim();
         const nombres = text.substring(90, 125).trim();
         fullName = `${nombres} ${ap1} ${ap2}`;
       } else {
-        const match = text.match(/\d{8}/);
-        dni = match ? match[0] : "";
         fullName = "Nombre no disponible";
       }
 
@@ -253,6 +266,7 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
           className="rounded-xl w-full max-w-md shadow-lg"
           autoPlay
           muted
+          playsInline
         />
         {/* Canvas oculto para procesar los frames con WASM */}
         <canvas ref={canvasRef} className="hidden" />
@@ -260,7 +274,7 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
       <div className="p-4 text-center text-white">
         <p className="text-sm opacity-80">
-          Enfoca el código PDF417 del DNI dentro del marco
+          Enfoca el código de barras del DNI, de cerca y con buena luz
         </p>
       </div>
     </div>

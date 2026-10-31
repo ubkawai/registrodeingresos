@@ -28,3 +28,15 @@ playwright/.cache
 *.njsproj
 *.sln
 *.sw?
+
+# Variables de entorno (secretos): nunca subir a git
+.env
+.env.*
+!.env.example
+
+# Supabase CLI
+supabase/.temp
+
+# Cloudflare / Wrangler
+.wrangler
+.dev.vars

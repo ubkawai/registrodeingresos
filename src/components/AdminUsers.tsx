@@ -53,7 +53,16 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
-type Role = "admin" | "usuario";
+type Role = "admin" | "usuario" | "rrhh" | "kiosko";
+
+const ROLES: { value: Role; label: string; desc: string }[] = [
+  { value: "usuario", label: "Usuario", desc: "Eventos: registra y ve sus listas" },
+  { value: "rrhh", label: "RR.HH.", desc: "Asistencia: trabajadores, reportes y correcciones" },
+  { value: "kiosko", label: "Kiosko de asistencia", desc: "Equipo de la puerta: solo marca" },
+  { value: "admin", label: "Administrador", desc: "Todo, además gestiona cuentas" },
+];
+
+const roleLabel = (r: Role) => ROLES.find((x) => x.value === r)?.label ?? r;
 
 interface AppUser {
   id: string;
@@ -159,7 +168,7 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Usuarios</h1>
+        <h1 className="font-sign text-3xl font-bold">Usuarios</h1>
         <p className="text-sm text-muted-foreground">Solo el administrador puede crear cuentas</p>
       </div>
 
@@ -205,8 +214,11 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="usuario">Usuario: registra y ve sus listas</SelectItem>
-                  <SelectItem value="admin">Administrador: además gestiona cuentas</SelectItem>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}: {r.desc}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -290,7 +302,7 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                             u.role === "admin" && "border-primary/30 bg-primary/10 text-primary"
                           )}
                         >
-                          {u.role === "admin" ? "Administrador" : "Usuario"}
+                          {roleLabel(u.role)}
                         </Badge>
                         {!u.active && (
                           <Badge
@@ -324,28 +336,26 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                           </DropdownMenuItem>
                           {!isSelf && (
                             <>
-                              <DropdownMenuItem
-                                onSelect={() =>
-                                  run(
-                                    u.id,
-                                    {
-                                      action: "set_role",
-                                      id: u.id,
-                                      role: u.role === "admin" ? "usuario" : "admin",
-                                    },
-                                    u.role === "admin"
-                                      ? `${u.email} ahora es usuario`
-                                      : `${u.email} ahora es administrador`
-                                  )
-                                }
-                              >
-                                {u.role === "admin" ? (
-                                  <User className="mr-2 h-4 w-4" />
-                                ) : (
-                                  <ShieldCheck className="mr-2 h-4 w-4" />
-                                )}
-                                {u.role === "admin" ? "Quitar administrador" : "Hacer administrador"}
-                              </DropdownMenuItem>
+                              {ROLES.filter((r) => r.value !== u.role).map((r) => (
+                                <DropdownMenuItem
+                                  key={r.value}
+                                  onSelect={() =>
+                                    run(
+                                      u.id,
+                                      { action: "set_role", id: u.id, role: r.value },
+                                      `${u.email} ahora es ${r.label}`
+                                    )
+                                  }
+                                >
+                                  {r.value === "admin" ? (
+                                    <ShieldCheck className="mr-2 h-4 w-4" />
+                                  ) : (
+                                    <User className="mr-2 h-4 w-4" />
+                                  )}
+                                  Cambiar a {r.label}
+                                </DropdownMenuItem>
+                              ))}
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onSelect={() =>
                                   run(

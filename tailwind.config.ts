@@ -14,7 +14,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        mono: ['"Geist Mono"', "ui-monospace", "Consolas", "monospace"],
+        sans: ['"Archivo"', "system-ui", "-apple-system", '"Segoe UI"', "sans-serif"],
+        mono: ["ui-monospace", "Consolas", "monospace"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -77,6 +78,12 @@ export default {
           from: { opacity: "0", transform: "translateY(-6px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        // El letrero de veredicto "se sella" con cada lectura nueva
+        stamp: {
+          "0%": { transform: "scale(0.97)", opacity: "0.6" },
+          "60%": { transform: "scale(1.01)", opacity: "1" },
+          "100%": { transform: "scale(1)" },
+        },
         "accordion-down": {
           from: {
             height: "0",
@@ -98,6 +105,7 @@ export default {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "row-in": "row-in 0.35s ease-out",
+        stamp: "stamp 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2)",
       },
     },
   },
