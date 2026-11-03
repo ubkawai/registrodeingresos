@@ -44,6 +44,13 @@ import { parsePadronFile, type PersonaPadron } from "@/lib/padron";
 import { turnoHorario, type Trabajador, type Turno } from "@/lib/asistencia";
 
 const SIN_TURNO = "sin-turno";
+const MENSUAL = "horario-mensual";
+
+// Valor del selector de turno -> columnas del trabajador
+const turnoFila = (v: string) => ({
+  turno_id: v === SIN_TURNO || v === MENSUAL ? null : v,
+  horario_mensual: v === MENSUAL,
+});
 
 export const Trabajadores = ({ turnos }: { turnos: Turno[] }) => {
   const [lista, setLista] = useState<Trabajador[]>([]);
@@ -217,7 +224,9 @@ export const Trabajadores = ({ turnos }: { turnos: Turno[] }) => {
                     </p>
                   </div>
                   <div className="hidden text-right text-sm sm:block">
-                    {t ? (
+                    {w.horario_mensual ? (
+                      <Badge variant="outline">Horario mensual</Badge>
+                    ) : t ? (
                       <>
                         <p className="font-medium">{t.nombre}</p>
                         <p className="tabular-nums text-muted-foreground">{turnoHorario(t)}</p>
@@ -303,6 +312,7 @@ const TurnoSelect = ({
     </SelectTrigger>
     <SelectContent>
       <SelectItem value={SIN_TURNO}>Sin turno</SelectItem>
+      <SelectItem value={MENSUAL}>Rotativo (horario mensual)</SelectItem>
       {turnos
         .filter((t) => t.activo || t.id === value)
         .map((t) => (
@@ -341,7 +351,7 @@ const TrabajadorDialog = ({
     setNombre(w?.nombre_completo ?? "");
     setCargo(w?.cargo ?? "");
     setArea(w?.area ?? "");
-    setTurnoId(w?.turno_id ?? SIN_TURNO);
+    setTurnoId(w?.horario_mensual ? MENSUAL : (w?.turno_id ?? SIN_TURNO));
   }, [trabajador]);
 
   const buscarNombre = async () => {
@@ -367,7 +377,7 @@ const TrabajadorDialog = ({
       nombre_completo: nombre.trim(),
       cargo: cargo.trim() || null,
       area: area.trim() || null,
-      turno_id: turnoId === SIN_TURNO ? null : turnoId,
+      ...turnoFila(turnoId),
     };
     const { error } = nuevo
       ? await supabase.from("trabajadores").insert({ dni, ...fila })
@@ -470,7 +480,7 @@ const ImportarDialog = ({
       nuevos.map((p) => ({
         dni: p.dni,
         nombre_completo: p.nombre,
-        turno_id: turnoId === SIN_TURNO ? null : turnoId,
+        ...turnoFila(turnoId),
       })),
       { onConflict: "dni", ignoreDuplicates: true }
     );

@@ -212,6 +212,45 @@ export type Database = {
         }
         Relationships: []
       }
+      programacion_turnos: {
+        Row: {
+          dni: string
+          fecha: string
+          turno_id: string | null
+          updated_at: string
+          updated_por: string | null
+        }
+        Insert: {
+          dni: string
+          fecha: string
+          turno_id?: string | null
+          updated_at?: string
+          updated_por?: string | null
+        }
+        Update: {
+          dni?: string
+          fecha?: string
+          turno_id?: string | null
+          updated_at?: string
+          updated_por?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "programacion_turnos_dni_fkey"
+            columns: ["dni"]
+            isOneToOne: false
+            referencedRelation: "trabajadores"
+            referencedColumns: ["dni"]
+          },
+          {
+            foreignKeyName: "programacion_turnos_turno_id_fkey"
+            columns: ["turno_id"]
+            isOneToOne: false
+            referencedRelation: "turnos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scan_lists: {
         Row: {
           closed_at: string | null
@@ -287,6 +326,7 @@ export type Database = {
           cargo: string | null
           created_at: string
           dni: string
+          horario_mensual: boolean
           nombre_completo: string
           turno_id: string | null
           updated_at: string
@@ -297,6 +337,7 @@ export type Database = {
           cargo?: string | null
           created_at?: string
           dni: string
+          horario_mensual?: boolean
           nombre_completo: string
           turno_id?: string | null
           updated_at?: string
@@ -307,6 +348,7 @@ export type Database = {
           cargo?: string | null
           created_at?: string
           dni?: string
+          horario_mensual?: boolean
           nombre_completo?: string
           turno_id?: string | null
           updated_at?: string

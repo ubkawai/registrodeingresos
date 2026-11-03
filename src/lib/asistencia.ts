@@ -10,6 +10,8 @@ export type Turno = Database["public"]["Tables"]["turnos"]["Row"];
 export type Trabajador = Database["public"]["Tables"]["trabajadores"]["Row"];
 export type Empleador = Database["public"]["Tables"]["empleador"]["Row"];
 export type Marca = Database["public"]["Tables"]["marcas"]["Row"];
+// Horario mensual: turno_id null = descanso
+export type Programacion = Database["public"]["Tables"]["programacion_turnos"]["Row"];
 export type Jornada = Database["public"]["Tables"]["jornadas"]["Row"] & {
   marcas: Marca[];
   trabajadores: Pick<Trabajador, "nombre_completo" | "cargo" | "area"> | null;
@@ -80,6 +82,26 @@ export const turnoHorario = (t: Pick<Turno, "hora_inicio" | "hora_fin">) =>
 
 export const cruzaMedianoche = (t: Pick<Turno, "hora_inicio" | "hora_fin">) =>
   t.hora_fin <= t.hora_inicio;
+
+// Abreviatura de cada turno para la cuadrícula del horario mensual:
+// "Noche (vigilancia)" -> "NV", "Tarde" -> "T". Si se repite, se numera.
+export const abreviarTurnos = (turnos: Turno[]) => {
+  const res = new Map<string, string>();
+  const usadas = new Set<string>(["D"]);
+  for (const t of turnos) {
+    const palabras = t.nombre
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .split(/[^A-Za-z0-9]+/)
+      .filter((p) => p.length >= 3);
+    const base = (palabras.slice(0, 2).map((p) => p[0]).join("") || "T").toUpperCase();
+    let abr = base;
+    for (let i = 2; usadas.has(abr); i++) abr = `${base}${i}`;
+    usadas.add(abr);
+    res.set(t.id, abr);
+  }
+  return res;
+};
 
 // 125 -> "2 h 05 min"
 export const duracion = (min: number | null | undefined) => {

@@ -14,6 +14,7 @@ import { HoyEnVivo } from "@/components/asistencia/HoyEnVivo";
 import { Reportes } from "@/components/asistencia/Reportes";
 import { Trabajadores } from "@/components/asistencia/Trabajadores";
 import { Configuracion } from "@/components/asistencia/Configuracion";
+import { Horarios } from "@/components/asistencia/Horarios";
 import { toast } from "sonner";
 import {
   Clock,
@@ -23,13 +24,21 @@ import {
   Users,
   Settings,
   ShieldCheck,
+  CalendarDays,
   LogOut,
   Tent,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ROL_LABEL, type Empleador, type Turno } from "@/lib/asistencia";
 
-type Vista = "marcar" | "hoy" | "reportes" | "trabajadores" | "configuracion" | "usuarios";
+type Vista =
+  | "marcar"
+  | "hoy"
+  | "reportes"
+  | "trabajadores"
+  | "horarios"
+  | "configuracion"
+  | "usuarios";
 
 type AsistenciaProps = {
   session: any;
@@ -80,6 +89,7 @@ const Asistencia = ({ session, role, onCambiarModulo }: AsistenciaProps) => {
         { key: "marcar" as const, label: "Marcar", icon: ScanBarcode },
         { key: "reportes" as const, label: "Reportes", icon: FileSpreadsheet },
         { key: "trabajadores" as const, label: "Trabajadores", icon: Users },
+        { key: "horarios" as const, label: "Horario mensual", icon: CalendarDays },
         { key: "configuracion" as const, label: "Turnos", icon: Settings },
         ...(isAdmin ? [{ key: "usuarios" as const, label: "Usuarios", icon: ShieldCheck }] : []),
       ];
@@ -171,6 +181,8 @@ const Asistencia = ({ session, role, onCambiarModulo }: AsistenciaProps) => {
           <Reportes empleador={empleador} />
         ) : view === "trabajadores" ? (
           <Trabajadores turnos={turnos} />
+        ) : view === "horarios" ? (
+          <Horarios turnos={turnos} empleador={empleador} />
         ) : view === "configuracion" ? (
           <Configuracion
             turnos={turnos}

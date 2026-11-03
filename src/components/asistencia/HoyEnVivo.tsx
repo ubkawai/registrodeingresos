@@ -40,23 +40,30 @@ const abandonada = (j: Jornada, ahora: Date) => {
 export const HoyEnVivo = ({ turnos }: { turnos: Turno[] }) => {
   const [jornadas, setJornadas] = useState<Jornada[]>([]);
   const [trabajadores, setTrabajadores] = useState<Trabajador[]>([]);
+  // Turno programado hoy de quienes tienen horario mensual (null = descanso)
+  const [programacionHoy, setProgramacionHoy] = useState<Map<string, string | null>>(new Map());
   const [loading, setLoading] = useState(true);
   const [ahora, setAhora] = useState(() => new Date());
   const reloadTimer = useRef<number | null>(null);
 
   const load = async () => {
     const desde = new Date(Date.now() - 40 * 3600_000).toISOString();
-    const [j, t] = await Promise.all([
+    const [j, t, p] = await Promise.all([
       supabase
         .from("jornadas")
         .select(JORNADA_SELECT)
         .gte("entrada_at", desde)
         .order("entrada_at", { ascending: false }),
       supabase.from("trabajadores").select("*").eq("activo", true),
+      supabase
+        .from("programacion_turnos")
+        .select("dni, turno_id")
+        .eq("fecha", format(new Date(), "yyyy-MM-dd")),
     ]);
     if (j.error) toast.error("No se pudo cargar la asistencia: " + j.error.message);
     else setJornadas((j.data ?? []) as unknown as Jornada[]);
     if (!t.error) setTrabajadores(t.data ?? []);
+    if (!p.error) setProgramacionHoy(new Map((p.data ?? []).map((r) => [r.dni, r.turno_id])));
     setLoading(false);
   };
 
@@ -104,7 +111,10 @@ export const HoyEnVivo = ({ turnos }: { turnos: Turno[] }) => {
     const conJornadaHoy = new Set(jornadas.filter((j) => j.fecha === hoy).map((j) => j.dni));
     const turnoPorId = new Map(turnos.map((t) => [t.id, t]));
     const pendientes = trabajadores
-      .map((w) => ({ w, t: w.turno_id ? turnoPorId.get(w.turno_id) : undefined }))
+      .map((w) => {
+        const id = w.horario_mensual ? programacionHoy.get(w.dni) : w.turno_id;
+        return { w, t: id ? turnoPorId.get(id) : undefined };
+      })
       .filter(({ w, t }) => {
         if (!t || conJornadaHoy.has(w.dni)) return false;
         const inicio = new Date(`${hoy}T${t.hora_inicio}`);
@@ -117,7 +127,7 @@ export const HoyEnVivo = ({ turnos }: { turnos: Turno[] }) => {
     ).length;
 
     return { dentro, refrigerio, salieron, sinSalida, pendientes, tardanzas };
-  }, [jornadas, trabajadores, turnos, ahora, hoy]);
+  }, [jornadas, trabajadores, programacionHoy, turnos, ahora, hoy]);
 
   if (loading) {
     return (
@@ -201,7 +211,7 @@ export const HoyEnVivo = ({ turnos }: { turnos: Turno[] }) => {
         <Grupo
           titulo="Turno empezado sin marca"
           vacio="Todos los que tienen turno ya marcaron"
-          nota="Incluye a quienes tienen descanso hoy."
+          nota="En turnos fijos incluye a quienes tienen descanso hoy; los rotativos siguen el horario mensual."
         >
           {grupos.pendientes.map(({ w, t }) => (
             <Fila
