@@ -285,8 +285,11 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
             muted
             playsInline
           />
-          {/* Línea guía para alinear el código */}
-          <div className="pointer-events-none absolute inset-x-4 top-1/2 h-0.5 -translate-y-1/2 bg-red-500/70" />
+          {/* Esquinas del marco a los costados de la franja */}
+          <div className="pointer-events-none absolute inset-y-3 left-3 w-6 rounded-l-md border-y-4 border-l-4 border-green-400" />
+          <div className="pointer-events-none absolute inset-y-3 right-3 w-6 rounded-r-md border-y-4 border-r-4 border-green-400" />
+          {/* Línea verde que barre la franja buscando el código */}
+          <div className="pointer-events-none absolute inset-x-6 h-0.5 -translate-y-1/2 animate-scan-line bg-green-400 shadow-[0_0_8px_2px_rgba(74,222,128,0.8)]" />
         </div>
         {/* Canvas oculto para procesar los frames con WASM */}
         <canvas ref={canvasRef} className="hidden" />

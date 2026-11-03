@@ -84,6 +84,11 @@ export default {
           "60%": { transform: "scale(1.01)", opacity: "1" },
           "100%": { transform: "scale(1)" },
         },
+        // Línea del lector que barre la franja de arriba abajo
+        "scan-line": {
+          "0%, 100%": { top: "8%" },
+          "50%": { top: "92%" },
+        },
         "accordion-down": {
           from: {
             height: "0",
@@ -106,6 +111,7 @@ export default {
         "accordion-up": "accordion-up 0.2s ease-out",
         "row-in": "row-in 0.35s ease-out",
         stamp: "stamp 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2)",
+        "scan-line": "scan-line 2s ease-in-out infinite",
       },
     },
   },
