@@ -7,6 +7,9 @@ import { extractDniFromBarcode } from "@/lib/dni";
 // ⬇️ IMPORTAMOS ZXING EN WASM
 import { readBarcodes, type ReaderOptions } from "zxing-wasm";
 
+// Proporción ancho/alto de la franja de la cámara (horizontal, como el código del DNI)
+const STRIP_ASPECT = 2.4;
+
 interface ScannerProps {
   onScanSuccess: (dni: string, fullName: string) => void;
   isActive: boolean;
@@ -41,8 +44,8 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
           advanced: [{ focusMode: "continuous" } as any],
         } as any,
         audio: false,
@@ -137,9 +140,19 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
     if (video.readyState !== HTMLMediaElement.HAVE_ENOUGH_DATA) return;
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    if (!width || !height) return;
+    const videoW = video.videoWidth;
+    const videoH = video.videoHeight;
+    if (!videoW || !videoH) return;
+
+    // Solo analizamos la franja visible (el video se muestra con object-cover)
+    let width = videoW;
+    let height = Math.round(videoW / STRIP_ASPECT);
+    if (height > videoH) {
+      height = videoH;
+      width = Math.round(videoH * STRIP_ASPECT);
+    }
+    const sx = Math.round((videoW - width) / 2);
+    const sy = Math.round((videoH - height) / 2);
 
     canvas.width = width;
     canvas.height = height;
@@ -147,8 +160,8 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Dibujamos el frame actual del video
-    ctx.drawImage(video, 0, 0, width, height);
+    // Dibujamos la franja central del frame actual
+    ctx.drawImage(video, sx, sy, width, height, 0, 0, width, height);
     const imageData = ctx.getImageData(0, 0, width, height);
 
     try {
@@ -261,13 +274,20 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
       </div>
 
       <div className="flex-1 flex items-center justify-center p-4">
-        <video
-          ref={videoRef}
-          className="rounded-xl w-full max-w-md shadow-lg"
-          autoPlay
-          muted
-          playsInline
-        />
+        <div
+          className="relative w-full max-w-md overflow-hidden rounded-xl shadow-lg ring-2 ring-white/20"
+          style={{ aspectRatio: `${STRIP_ASPECT}` }}
+        >
+          <video
+            ref={videoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            playsInline
+          />
+          {/* Línea guía para alinear el código */}
+          <div className="pointer-events-none absolute inset-x-4 top-1/2 h-0.5 -translate-y-1/2 bg-red-500/70" />
+        </div>
         {/* Canvas oculto para procesar los frames con WASM */}
         <canvas ref={canvasRef} className="hidden" />
       </div>
