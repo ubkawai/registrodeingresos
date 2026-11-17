@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/client";
 import { Auth } from "@/components/Auth";
+import { CambiarPassword } from "@/components/CambiarPassword";
 import Eventos from "@/pages/Eventos";
 import Asistencia from "@/pages/Asistencia";
 import { Clock, Loader2, LogOut, Tent } from "lucide-react";
@@ -48,18 +49,22 @@ const Index = () => {
     return () => subscription.unsubscribe();
   }, []);
 
+  const [debeCambiarPassword, setDebeCambiarPassword] = useState(false);
+
   useEffect(() => {
     if (!userId) {
       setRole(null);
+      setDebeCambiarPassword(false);
       return;
     }
     supabase
       .from("profiles")
-      .select("role")
+      .select("role, must_change_password")
       .eq("id", userId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (error) console.error(error);
+        setDebeCambiarPassword(!!data?.must_change_password);
         setRole(data?.role ?? "usuario");
       });
   }, [userId]);
@@ -72,6 +77,14 @@ const Index = () => {
   if (!sessionLoaded) return <Cargando />;
   if (!session) return <Auth />;
   if (!role) return <Cargando />;
+  if (debeCambiarPassword) {
+    return (
+      <CambiarPassword
+        email={session.user?.email ?? ""}
+        onListo={() => setDebeCambiarPassword(false)}
+      />
+    );
+  }
 
   if (role === "usuario") return <Eventos session={session} role={role} />;
   if (role === "rrhh" || role === "kiosko") return <Asistencia session={session} role={role} />;

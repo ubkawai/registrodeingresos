@@ -196,18 +196,21 @@ export type Database = {
           created_at: string
           email: string
           id: string
+          must_change_password: boolean
           role: string
         }
         Insert: {
           created_at?: string
           email: string
           id: string
+          must_change_password?: boolean
           role?: string
         }
         Update: {
           created_at?: string
           email?: string
           id?: string
+          must_change_password?: boolean
           role?: string
         }
         Relationships: []
@@ -400,6 +403,10 @@ export type Database = {
     Functions: {
       anular_marca: {
         Args: { p_id: string; p_motivo: string }
+        Returns: undefined
+      }
+      confirmar_cambio_password: {
+        Args: Record<PropertyKey, never>
         Returns: undefined
       }
       es_rrhh: { Args: Record<PropertyKey, never>; Returns: boolean }

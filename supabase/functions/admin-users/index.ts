@@ -98,10 +98,11 @@ Deno.serve(async (req) => {
           return reply({ error: msg });
         }
 
-        // El trigger crea el perfil como 'usuario'
+        // El trigger crea el perfil como 'usuario'. Debe cambiar la
+        // contraseña la primera vez que inicie sesión.
         const { error: upErr } = await admin
           .from("profiles")
-          .upsert({ id: data.user.id, email, role });
+          .upsert({ id: data.user.id, email, role, must_change_password: true });
         if (upErr) throw upErr;
         return reply({ ok: true });
       }
@@ -113,6 +114,15 @@ Deno.serve(async (req) => {
         }
         const { error } = await admin.auth.admin.updateUserById(id, { password });
         if (error) throw error;
+        // Si el admin restablece la contraseña de otra persona, esa persona
+        // debe cambiarla al volver a entrar.
+        if (!isSelf) {
+          const { error: pErr } = await admin
+            .from("profiles")
+            .update({ must_change_password: true })
+            .eq("id", id);
+          if (pErr) throw pErr;
+        }
         return reply({ ok: true });
       }
 

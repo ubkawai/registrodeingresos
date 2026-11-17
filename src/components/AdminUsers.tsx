@@ -195,7 +195,7 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="new-password">Contraseña</Label>
+              <Label htmlFor="new-password">Contraseña temporal</Label>
               <Input
                 id="new-password"
                 type="text"
@@ -206,6 +206,9 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                 minLength={6}
                 required
               />
+              <p className="text-xs text-muted-foreground">
+                Se le pedirá cambiarla la primera vez que inicie sesión.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Rol</Label>
@@ -421,6 +424,9 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                 required
                 autoFocus
               />
+              <p className="text-xs text-muted-foreground">
+                Deberá cambiarla al volver a iniciar sesión.
+              </p>
             </div>
             <DialogFooter>
               <Button type="submit" disabled={busyId === pwdUser?.id}>
