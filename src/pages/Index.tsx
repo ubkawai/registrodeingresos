@@ -13,21 +13,25 @@ import { Clock, Loader2, LogOut, Tent } from "lucide-react";
 //   admin   -> elige (se recuerda en este equipo)
 type Modulo = "eventos" | "asistencia";
 
-const MODULO_KEY = "modulo";
+// Se recuerda por usuario: otro admin en el mismo equipo ve el selector
+const moduloKey = (userId: string) => `modulo:${userId}`;
 
-const leerModulo = (): Modulo | null => {
+const leerModulo = (userId: string | undefined): Modulo | null => {
+  if (!userId) return null;
   try {
-    const v = localStorage.getItem(MODULO_KEY);
+    const v = localStorage.getItem(moduloKey(userId));
     return v === "eventos" || v === "asistencia" ? v : null;
   } catch {
     return null;
   }
 };
 
-const guardarModulo = (m: Modulo | null) => {
+const guardarModulo = (userId: string | undefined, m: Modulo | null) => {
+  if (!userId) return;
   try {
-    if (m) localStorage.setItem(MODULO_KEY, m);
-    else localStorage.removeItem(MODULO_KEY);
+    if (m) localStorage.setItem(moduloKey(userId), m);
+    else localStorage.removeItem(moduloKey(userId));
+    localStorage.removeItem("modulo"); // clave anterior, compartida por todos
   } catch {}
 };
 
@@ -36,7 +40,11 @@ const Index = () => {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const userId: string | undefined = session?.user?.id;
   const [role, setRole] = useState<string | null>(null);
-  const [modulo, setModulo] = useState<Modulo | null>(leerModulo);
+  const [modulo, setModulo] = useState<Modulo | null>(null);
+
+  useEffect(() => {
+    setModulo(leerModulo(userId));
+  }, [userId]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -70,7 +78,7 @@ const Index = () => {
   }, [userId]);
 
   const elegir = (m: Modulo | null) => {
-    guardarModulo(m);
+    guardarModulo(userId, m);
     setModulo(m);
   };
 
