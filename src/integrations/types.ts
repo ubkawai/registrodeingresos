@@ -131,6 +131,30 @@ export type Database = {
           },
         ]
       }
+      lugares: {
+        Row: {
+          activo: boolean
+          created_at: string
+          hora_limite: string
+          id: string
+          nombre: string
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          hora_limite?: string
+          id?: string
+          nombre: string
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          hora_limite?: string
+          id?: string
+          nombre?: string
+        }
+        Relationships: []
+      }
       marcas: {
         Row: {
           anulada_at: string | null
@@ -188,6 +212,47 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "trabajadores"
             referencedColumns: ["dni"]
+          },
+        ]
+      }
+      movimientos: {
+        Row: {
+          created_at: string
+          dni_number: string
+          full_name: string
+          id: string
+          motivo: string | null
+          scan_list_id: string
+          tipo: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          dni_number: string
+          full_name: string
+          id?: string
+          motivo?: string | null
+          scan_list_id: string
+          tipo: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          dni_number?: string
+          full_name?: string
+          id?: string
+          motivo?: string | null
+          scan_list_id?: string
+          tipo?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "movimientos_scan_list_id_fkey"
+            columns: ["scan_list_id"]
+            isOneToOne: false
+            referencedRelation: "scan_lists"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -258,7 +323,9 @@ export type Database = {
         Row: {
           closed_at: string | null
           created_at: string
+          estadia_fin_at: string | null
           id: string
+          lugar_id: string | null
           padron: Json | null
           padron_archivo: string | null
           title: string
@@ -267,7 +334,9 @@ export type Database = {
         Insert: {
           closed_at?: string | null
           created_at?: string
+          estadia_fin_at?: string | null
           id?: string
+          lugar_id?: string | null
           padron?: Json | null
           padron_archivo?: string | null
           title: string
@@ -276,13 +345,23 @@ export type Database = {
         Update: {
           closed_at?: string | null
           created_at?: string
+          estadia_fin_at?: string | null
           id?: string
+          lugar_id?: string | null
           padron?: Json | null
           padron_archivo?: string | null
           title?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "scan_lists_lugar_id_fkey"
+            columns: ["lugar_id"]
+            isOneToOne: false
+            referencedRelation: "lugares"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       scanned_records: {
         Row: {
@@ -410,11 +489,16 @@ export type Database = {
         Returns: undefined
       }
       es_rrhh: { Args: Record<PropertyKey, never>; Returns: boolean }
+      estado_puerta: { Args: { p_lugar_id: string }; Returns: Json }
       marcar_asistencia: {
         Args: { p_dni: string; p_tipo?: string }
         Returns: Json
       }
       mi_rol: { Args: Record<PropertyKey, never>; Returns: string }
+      registrar_movimiento: {
+        Args: { p_dni: string; p_lugar_id: string; p_motivo?: string }
+        Returns: Json
+      }
       registrar_marca_manual: {
         Args: {
           p_dni: string

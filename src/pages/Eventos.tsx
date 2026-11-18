@@ -24,8 +24,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { RecordsList } from "@/components/RecordsList";
 import { AdminUsers } from "@/components/AdminUsers";
+import { Puerta } from "@/components/eventos/Puerta";
+import { LugaresDialog } from "@/components/eventos/LugaresDialog";
+import { MovimientosLista } from "@/components/eventos/MovimientosLista";
+import { cargarLugares, etapaLista, type Lugar } from "@/lib/estadia";
 import { toast } from "sonner";
 import {
   ScanBarcode,
@@ -46,6 +57,10 @@ import {
   FileUp,
   Trash2,
   Clock,
+  DoorOpen,
+  MapPin,
+  Settings2,
+  Flag,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -64,7 +79,13 @@ interface Record {
   fuente?: Fuente;
 }
 
-type OpenList = { id: string; title: string };
+type OpenList = { id: string; title: string; lugar_id: string | null };
+
+const toOpenList = (row: any): OpenList => ({
+  id: row.id,
+  title: row.title,
+  lugar_id: row.lugar_id ?? null,
+});
 
 // Resultado de la lectura: pinta el letrero de veredicto
 type Estado = "ok" | "fuera" | "dup" | "error";
@@ -117,10 +138,37 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const [listTitle, setListTitle] = useState("");
   const [loading, setLoading] = useState(false);
   const [savedLists, setSavedLists] = useState<any[]>([]);
-  const [view, setView] = useState<"registro" | "listas" | "usuarios">("registro");
+  const [view, setView] = useState<"registro" | "puerta" | "listas" | "usuarios">("registro");
   const showSavedLists = view === "listas";
   const isAdmin = role === "admin";
   const [listSearch, setListSearch] = useState("");
+  const [lugarFiltro, setLugarFiltro] = useState<string>("todos");
+
+  // ====== Lugares (a dónde va cada lista) ======
+  const [lugares, setLugares] = useState<Lugar[]>([]);
+  const lugaresActivos = useMemo(() => lugares.filter((l) => l.activo), [lugares]);
+  const lugaresActivosRef = useRef<Lugar[]>([]);
+  lugaresActivosRef.current = lugaresActivos;
+  const [lugaresOpen, setLugaresOpen] = useState(false);
+  // Lugar de la lista en curso (o el elegido antes de la primera lectura)
+  const [lugarId, setLugarId] = useState<string | null>(null);
+  const lugarIdRef = useRef<string | null>(null);
+  lugarIdRef.current = lugarId;
+  const [askLugar, setAskLugar] = useState(false);
+  const [vencidosPuerta, setVencidosPuerta] = useState(0);
+  const [finalizarOpen, setFinalizarOpen] = useState(false);
+
+  const recargarLugares = () =>
+    cargarLugares()
+      .then(setLugares)
+      .catch((e) => toast.error("No se pudieron cargar los lugares: " + e.message));
+
+  useEffect(() => {
+    if (session) recargarLugares();
+  }, [session]);
+
+  const nombreLugar = (id: string | null | undefined) =>
+    lugares.find((l) => l.id === id)?.nombre ?? "";
 
   // Lista abierta en la BD: cada lectura se guarda en ella al instante y los
   // demás equipos con la misma cuenta la reciben por Realtime.
@@ -210,10 +258,16 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     openListRef.current = list;
     setOpenList(list);
     if (!titleFocusedRef.current) setListTitle(list?.title ?? "");
+    if (list) {
+      lugarIdRef.current = list.lugar_id;
+      setLugarId(list.lugar_id);
+    }
   };
 
   const resetOpenList = () => {
     applyOpenList(null);
+    lugarIdRef.current = null;
+    setLugarId(null);
     setPadron(null);
     setCurrentRecords([]);
     setLastRead(null);
@@ -243,7 +297,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       if (openListRef.current) resetOpenList();
       return;
     }
-    applyOpenList({ id: data.id, title: data.title });
+    applyOpenList(toOpenList(data));
     setPadron(toPadron(data));
     setCurrentRecords((data.scanned_records || []).map(toRecord));
   };
@@ -277,7 +331,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     const title = listTitleRef.current.trim() || defaultTitle();
     const { data, error } = await supabase
       .from("scan_lists")
-      .insert({ title, user_id: userId! })
+      .insert({ title, user_id: userId!, lugar_id: lugarIdRef.current })
       .select()
       .single();
 
@@ -290,7 +344,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           .is("closed_at", null)
           .maybeSingle();
         if (existing) {
-          const list = { id: existing.id, title: existing.title };
+          const list = toOpenList(existing);
           applyOpenList(list);
           return list;
         }
@@ -298,7 +352,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       throw error;
     }
 
-    const list = { id: data.id, title: data.title };
+    const list = toOpenList(data);
     applyOpenList(list);
     return list;
   };
@@ -370,7 +424,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           if (!row.closed_at) {
             if (!current || current.id === row.id) {
               if (!current) setCurrentRecords([]);
-              applyOpenList({ id: row.id, title: row.title });
+              applyOpenList(toOpenList(row));
               loadPadron(row.id);
             }
             return;
@@ -528,6 +582,13 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     const code = raw.trim();
     if (!code) return;
 
+    // Antes de la primera lectura se pide el lugar de destino de la lista
+    if (!lugarIdRef.current && lugaresActivosRef.current.length > 0 && recordsRef.current.length === 0) {
+      pendingCodeRef.current = { code, at: Date.now() };
+      setAskLugar(true);
+      return;
+    }
+
     // Antes de la primera lectura se pide la lista de invitados (o confirmar
     // que se sigue sin ella). La lectura queda en espera, no se pierde.
     if (!padronRef.current && !sinPadronRef.current && recordsRef.current.length === 0) {
@@ -546,6 +607,34 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     if (pending && Date.now() - pending.at < 2 * 60 * 1000) runCode(pending.code);
   };
 
+  // Lugar de la lista: si ya existe se guarda al instante (los otros equipos
+  // lo reciben); si no, se usa al crearla con la primera lectura
+  const cambiarLugar = async (id: string) => {
+    const anterior = lugarIdRef.current;
+    lugarIdRef.current = id;
+    setLugarId(id);
+    const list = openListRef.current;
+    if (!list) return;
+    const { error } = await supabase.from("scan_lists").update({ lugar_id: id }).eq("id", list.id);
+    if (error) {
+      lugarIdRef.current = anterior;
+      setLugarId(anterior);
+      toast.error("No se pudo cambiar el lugar: " + error.message);
+      return;
+    }
+    openListRef.current = { ...list, lugar_id: id };
+  };
+
+  const elegirLugarYSeguir = async (id: string) => {
+    setAskLugar(false);
+    await cambiarLugar(id);
+    // Sigue el flujo normal con la lectura en espera (puede pedir el padrón)
+    const pending = pendingCodeRef.current;
+    pendingCodeRef.current = null;
+    if (pending && Date.now() - pending.at < 2 * 60 * 1000) enqueueCode(pending.code);
+    else focusScan();
+  };
+
   const continueSinPadron = () => {
     sinPadronRef.current = true;
     setAskPadron(false);
@@ -560,7 +649,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
   // Lector alámbrico o inalámbrico (ambos funcionan como teclado)
   useBarcodeScanner(enqueueCode, {
-    enabled: !!session && view === "registro" && !askPadron,
+    enabled: !!session && view === "registro" && !askPadron && !askLugar && !finalizarOpen,
   });
 
   // Mantiene el foco en el campo del lector
@@ -598,7 +687,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   };
 
   // ================== Finalizar lista ==================
-  const handleSaveList = async () => {
+  const handleSaveList = () => {
     if (!listTitle.trim()) {
       toast.error("Ingresa un título para la lista");
       return;
@@ -608,18 +697,39 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       toast.error("No hay registros para guardar");
       return;
     }
+    setFinalizarOpen(true);
+  };
 
+  // Con estadía: la lista sigue activa en la puerta de su lugar hasta que se
+  // termine la estadía. Sin estadía: queda finalizada (evento de un día).
+  const cerrarLista = async (conEstadia: boolean) => {
+    const list = openListRef.current;
+    if (!list) return;
+    if (conEstadia && !lugarIdRef.current) {
+      toast.error("Elige el lugar de destino para controlar la estadía");
+      return;
+    }
+    setFinalizarOpen(false);
     setLoading(true);
     closingRef.current = true;
     try {
+      const ahora = new Date().toISOString();
       const { error } = await supabase
         .from("scan_lists")
-        .update({ title: listTitle.trim(), closed_at: new Date().toISOString() })
+        .update({
+          title: listTitle.trim(),
+          closed_at: ahora,
+          estadia_fin_at: conEstadia ? null : ahora,
+        })
         .eq("id", list.id);
 
       if (error) throw error;
 
-      toast.success("Lista guardada");
+      toast.success(
+        conEstadia
+          ? `Llegada cerrada. "${listTitle.trim()}" está en estadía en ${nombreLugar(lugarIdRef.current)}`
+          : "Lista finalizada"
+      );
       resetOpenList();
       setListTitle("");
       await loadSavedLists();
@@ -688,6 +798,30 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     }
   };
 
+  // Fin de la estadía: la lista deja de contar en la puerta
+  const terminarEstadia = async (list: any) => {
+    const { data: fuera } = list.lugar_id
+      ? await supabase.rpc("estado_puerta", { p_lugar_id: list.lugar_id })
+      : { data: null };
+    const pendientes = ((fuera as any)?.fuera ?? []).filter((p: any) => p.lista_id === list.id);
+    const aviso = pendientes.length
+      ? `\n\nAtención: ${pendientes.length} ${
+          pendientes.length === 1 ? "acampante sigue" : "acampantes siguen"
+        } fuera: ${pendientes.map((p: any) => p.nombre).join(", ")}.`
+      : "";
+    if (!window.confirm(`¿Terminar la estadía de "${list.title}"?${aviso}`)) return;
+    const { error } = await supabase
+      .from("scan_lists")
+      .update({ estadia_fin_at: new Date().toISOString() })
+      .eq("id", list.id);
+    if (error) {
+      toast.error("No se pudo terminar la estadía: " + error.message);
+      return;
+    }
+    toast.success(`Estadía terminada: ${list.title}`);
+    loadSavedLists();
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     toast.success("Sesión cerrada");
@@ -715,8 +849,18 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
   const filteredLists = useMemo(() => {
     const q = listSearch.trim().toLowerCase();
-    if (!q) return savedLists;
-    return savedLists.filter(
+    const porLugar =
+      lugarFiltro === "todos"
+        ? savedLists
+        : savedLists.filter((l) =>
+            lugarFiltro === "ninguno" ? !l.lugar_id : l.lugar_id === lugarFiltro
+          );
+    // Primero las que están en estadía
+    const ordenadas = [...porLugar].sort(
+      (a, b) => Number(etapaLista(b) === "estadia") - Number(etapaLista(a) === "estadia")
+    );
+    if (!q) return ordenadas;
+    return ordenadas.filter(
       (l) =>
         l.title?.toLowerCase().includes(q) ||
         (l.scanned_records || []).some(
@@ -724,7 +868,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
             r.dni_number.includes(q) || r.full_name.toLowerCase().includes(q)
         )
     );
-  }, [savedLists, listSearch]);
+  }, [savedLists, listSearch, lugarFiltro]);
 
   const scannerStatus = lookupLoading
     ? { text: "Consultando…", dot: "bg-warning", pulse: true }
@@ -734,6 +878,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
   const tabs = [
     { key: "registro" as const, label: "Registro", icon: ScanBarcode },
+    { key: "puerta" as const, label: "Puerta", icon: DoorOpen, alerta: vencidosPuerta },
     { key: "listas" as const, label: "Listas", icon: ClipboardList, count: savedLists.length },
     ...(isAdmin ? [{ key: "usuarios" as const, label: "Usuarios", icon: ShieldCheck }] : []),
   ];
@@ -772,6 +917,14 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                 {t.count !== undefined && t.count > 0 && (
                   <span className="text-xs tabular-nums opacity-60">{t.count}</span>
                 )}
+                {!!t.alerta && (
+                  <span
+                    className="flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-bold tabular-nums text-white"
+                    title={`${t.alerta} fuera de hora`}
+                  >
+                    {t.alerta}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -793,6 +946,12 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                 </p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {isAdmin && (
+                <DropdownMenuItem onSelect={() => setLugaresOpen(true)}>
+                  <MapPin className="mr-2 h-4 w-4" />
+                  Lugares
+                </DropdownMenuItem>
+              )}
               {onCambiarModulo && (
                 <DropdownMenuItem onSelect={onCambiarModulo}>
                   <Clock className="mr-2 h-4 w-4" />
@@ -838,8 +997,113 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ================== ¿A qué lugar va la lista? ================== */}
+      <AlertDialog
+        open={askLugar}
+        onOpenChange={(open) => {
+          setAskLugar(open);
+          if (!open) {
+            pendingCodeRef.current = null;
+            focusScan();
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-md rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-sign text-2xl font-bold">
+              ¿A qué lugar va esta lista?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-base">
+              El lugar define en qué puerta se controlan las salidas y los regresos. El DNI que
+              escaneaste se registrará al elegirlo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-2">
+            {lugaresActivos.map((l) => (
+              <Button
+                key={l.id}
+                variant="outline"
+                className="h-12 justify-start rounded-md text-base"
+                onClick={() => elegirLugarYSeguir(l.id)}
+              >
+                <MapPin className="mr-2 h-4 w-4 text-primary" />
+                {l.nombre}
+              </Button>
+            ))}
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ================== Cerrar la llegada ================== */}
+      <AlertDialog open={finalizarOpen} onOpenChange={setFinalizarOpen}>
+        <AlertDialogContent className="max-w-md rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-sign text-2xl font-bold">
+              Cerrar la llegada
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-base">
+              {lugarId
+                ? `Si el grupo se queda en ${nombreLugar(lugarId)}, pásalo a estadía para controlar sus salidas y regresos en la Puerta.`
+                : "Esta lista no tiene lugar de destino, así que no se pueden controlar salidas. Elige un lugar en la lista para habilitar la estadía."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-2">
+            <Button
+              className="h-auto justify-start rounded-md px-4 py-3 text-left"
+              onClick={() => cerrarLista(true)}
+              disabled={!lugarId}
+              autoFocus
+            >
+              <DoorOpen className="mr-3 h-5 w-5 shrink-0" />
+              <span>
+                <span className="block font-semibold">Pasar a estadía</span>
+                <span className="block text-sm font-normal opacity-80">
+                  Sigue activa en la Puerta hasta terminar la estadía
+                </span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto justify-start rounded-md px-4 py-3 text-left"
+              onClick={() => cerrarLista(false)}
+            >
+              <Flag className="mr-3 h-5 w-5 shrink-0" />
+              <span>
+                <span className="block font-semibold">Finalizar sin estadía</span>
+                <span className="block text-sm font-normal text-muted-foreground">
+                  Evento de un día: la lista pasa directo a finalizadas
+                </span>
+              </span>
+            </Button>
+            <Button variant="ghost" onClick={() => setFinalizarOpen(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {isAdmin && (
+        <LugaresDialog
+          open={lugaresOpen}
+          onOpenChange={setLugaresOpen}
+          lugares={lugares}
+          onCambio={recargarLugares}
+        />
+      )}
+
       <main className="mx-auto max-w-6xl px-4 py-5 sm:py-8">
-        {view === "usuarios" && isAdmin ? (
+        {/* La puerta sigue montada en otras pestañas para avisar a la hora límite */}
+        <div className={view === "puerta" ? undefined : "hidden"}>
+          <Puerta
+            active={view === "puerta" && !lugaresOpen}
+            isAdmin={isAdmin}
+            lugares={lugares}
+            onAdministrarLugares={() => setLugaresOpen(true)}
+            onVencidos={setVencidosPuerta}
+          />
+        </div>
+
+        {view === "puerta" ? null : view === "usuarios" && isAdmin ? (
           <AdminUsers currentUserId={userId!} />
         ) : view === "registro" ? (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-10">
@@ -1036,6 +1300,37 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                     className="font-sign w-full rounded-sm bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50"
                     title="Título de la lista (clic para editar)"
                   />
+                  {lugaresActivos.length > 0 || lugarId ? (
+                    <Select value={lugarId ?? undefined} onValueChange={cambiarLugar}>
+                      <SelectTrigger
+                        className="mt-1 h-8 w-auto max-w-full gap-1.5 border-0 bg-transparent px-0 text-sm font-medium shadow-none focus:ring-0 focus:ring-offset-0 [&>span]:truncate"
+                        aria-label="Lugar de destino"
+                      >
+                        <MapPin className={cn("h-4 w-4 shrink-0", lugarId ? "text-primary" : "text-muted-foreground")} />
+                        <SelectValue placeholder="Elegir lugar de destino" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {lugares
+                          .filter((l) => l.activo || l.id === lugarId)
+                          .map((l) => (
+                            <SelectItem key={l.id} value={l.id}>
+                              {l.nombre}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setLugaresOpen(true)}
+                        className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                      >
+                        <Settings2 className="h-4 w-4" />
+                        Crear lugares de destino
+                      </button>
+                    )
+                  )}
                   <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1.5" title="Registrados">
                       <Users className="h-4 w-4 text-success" />
@@ -1079,7 +1374,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                 <Button
                   onClick={handleSaveList}
                   disabled={loading || !openList || currentRecords.length === 0}
-                  title="Cierra la lista y la pasa a Listas"
+                  title="Cierra la llegada: pasa la lista a estadía o la finaliza"
                   className="h-10 rounded-md px-4"
                 >
                   {loading ? (
@@ -1087,7 +1382,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   ) : (
                     <Check className="mr-2 h-4 w-4" />
                   )}
-                  Finalizar lista
+                  Cerrar llegada
                 </Button>
               </div>
               <div className="max-h-[calc(100vh-12rem)] overflow-y-auto px-2 py-1 sm:px-3">
@@ -1106,13 +1401,37 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           <div className="mx-auto max-w-3xl space-y-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h1 className="font-sign text-3xl font-bold">Listas finalizadas</h1>
+                <h1 className="font-sign text-3xl font-bold">Listas</h1>
                 <p className="text-sm text-muted-foreground">
                   {savedLists.length === 0
-                    ? "Aquí aparecen las listas al finalizarlas"
-                    : `${savedLists.length} ${savedLists.length === 1 ? "lista" : "listas"}`}
+                    ? "Aquí aparecen las listas al cerrar la llegada"
+                    : `${savedLists.length} ${savedLists.length === 1 ? "lista" : "listas"}` +
+                      (() => {
+                        const n = savedLists.filter((l) => etapaLista(l) === "estadia").length;
+                        return n ? ` · ${n} en estadía` : "";
+                      })()}
                 </p>
               </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+              {lugares.length > 0 && (
+                <Select value={lugarFiltro} onValueChange={setLugarFiltro}>
+                  <SelectTrigger
+                    className="h-10 rounded-md border-2 bg-card sm:w-48"
+                    aria-label="Filtrar por lugar"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los lugares</SelectItem>
+                    {lugares.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.nombre}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="ninguno">Sin lugar</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
               <div className="relative sm:w-72">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1122,12 +1441,13 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   className="rounded-md border-2 bg-card pl-9 focus-visible:border-primary focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
               </div>
+              </div>
             </div>
 
             {filteredLists.length === 0 ? (
               <div className="rounded-lg border-2 border-dashed py-16 text-center text-sm text-muted-foreground">
                 {savedLists.length === 0
-                  ? "Todavía no hay listas finalizadas. Usa “Finalizar lista” en Registro."
+                  ? "Todavía no hay listas. Usa “Cerrar llegada” en Registro."
                   : "Ninguna lista coincide con la búsqueda"}
               </div>
             ) : (
@@ -1138,15 +1458,37 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   const enLista = dnis
                     ? (list.scanned_records || []).filter((r: Record) => dnis.has(r.dni_number)).length
                     : 0;
+                  const etapa = etapaLista(list);
+                  const lugarLista = lugares.find((l) => l.id === list.lugar_id) ?? null;
+                  // Tuvo estadía si no se finalizó en el mismo momento que se cerró la llegada
+                  const tuvoEstadia =
+                    etapa === "estadia" ||
+                    (!!list.estadia_fin_at && list.estadia_fin_at !== list.closed_at);
                   return (
                     <Collapsible key={list.id}>
                       <CollapsibleTrigger className="group flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/50 sm:px-5">
                         <div className="min-w-0 flex-1">
-                          <p className="font-sign truncate text-lg font-bold">{list.title}</p>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="flex items-center gap-2">
+                            <span className="font-sign truncate text-lg font-bold">{list.title}</span>
+                            {etapa === "estadia" && (
+                              <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-semibold text-success">
+                                En estadía
+                              </span>
+                            )}
+                          </p>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {lugarLista && (
+                              <>
+                                <MapPin className="-mt-0.5 mr-1 inline h-3.5 w-3.5" />
+                                {lugarLista.nombre} ·{" "}
+                              </>
+                            )}
                             {format(new Date(list.created_at), "d 'de' MMMM yyyy, HH:mm", {
                               locale: es,
                             })}
+                            {list.estadia_fin_at && tuvoEstadia && (
+                              <> → {format(new Date(list.estadia_fin_at), "d 'de' MMMM, HH:mm", { locale: es })}</>
+                            )}
                           </p>
                         </div>
                         {dnis && (
@@ -1169,6 +1511,31 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <div className="border-t bg-background/60 px-2 py-1 sm:px-3">
+                          {etapa === "estadia" && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-1 py-3">
+                              <p className="text-sm text-muted-foreground">
+                                Las salidas y regresos se registran en la pestaña Puerta.
+                              </p>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                onClick={() => terminarEstadia(list)}
+                              >
+                                <Flag className="mr-1.5 h-3.5 w-3.5" />
+                                Terminar estadía
+                              </Button>
+                            </div>
+                          )}
+                          {tuvoEstadia && (
+                            <div className="border-b">
+                              <MovimientosLista
+                                listaId={list.id}
+                                titulo={list.title}
+                                lugar={lugarLista}
+                              />
+                            </div>
+                          )}
                           <RecordsList
                             records={list.scanned_records || []}
                             emptyText="Esta lista no tiene registros"
