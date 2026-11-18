@@ -74,30 +74,35 @@ export const parseFechas = (v: Cell): { inicio: string; fin: string | null } | n
   return null;
 };
 
-// Valor de una etiqueta de la cabecera: en la misma celda tras ":" o en la
-// siguiente celda con contenido de la fila
-const valorEtiqueta = (rows: Cell[][], etiqueta: RegExp): Cell => {
+// Valores de una etiqueta de la cabecera: en la misma celda tras ":" o en las
+// siguientes celdas con contenido de la fila
+const valorEtiqueta = (rows: Cell[][], etiqueta: RegExp): Cell[] => {
   for (const row of rows.slice(0, 15)) {
     for (let j = 0; j < row.length; j++) {
       const txt = textCell(row[j]);
       if (!etiqueta.test(txt)) continue;
       const tras = txt.split(":").slice(1).join(":").trim();
-      if (tras) return tras;
-      for (let k = j + 1; k < row.length; k++) {
-        const v = row[k];
-        if (v !== null && v !== undefined && String(v).trim() !== "") return v;
-      }
+      if (tras) return [tras];
+      return row
+        .slice(j + 1)
+        .filter((v) => v !== null && v !== undefined && String(v).trim() !== "");
     }
   }
-  return null;
+  return [];
 };
 
-const parseCabecera = (rows: Cell[][]) => {
-  const org = valorEtiqueta(rows, /instituci|organizaci/i);
-  const fecha = valorEtiqueta(rows, /fecha/i);
+export const parseCabecera = (rows: Cell[][]) => {
+  const [org] = valorEtiqueta(rows, /instituci|organizaci/i);
+  const valores = valorEtiqueta(rows, /fecha/i);
+  // "19/11/2026 - 21/11/2026" en una celda, o cada fecha en su celda
+  let fechas = parseFechas(valores[0] ?? null);
+  if (fechas && !fechas.fin && valores.length > 1) {
+    const otra = parseFechas(valores[valores.length - 1]);
+    if (otra && otra.inicio > fechas.inicio) fechas = { inicio: fechas.inicio, fin: otra.inicio };
+  }
   return {
     organizacion: typeof org === "string" ? org.trim() : org ? String(org) : undefined,
-    fechas: parseFechas(fecha) ?? undefined,
+    fechas: fechas ?? undefined,
   };
 };
 

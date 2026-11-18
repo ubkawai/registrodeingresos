@@ -147,7 +147,8 @@ const padronDnis = (row: any): Set<string> | null => {
   return p ? new Set(p.personas.map((x) => x.dni)) : null;
 };
 
-const defaultTitle = () => `Ingreso ${format(new Date(), "dd/MM/yyyy HH:mm")}`;
+// Sin Excel (o sin institución en el Excel) la lista se llama "Ingreso" y la fecha
+const defaultTitle = () => `Ingreso ${format(new Date(), "dd/MM/yyyy")}`;
 
 // En el celular no se fuerza el foco al campo del lector: abriría el teclado
 // en pantalla. Un lector Bluetooth igual funciona por el escucha global.
@@ -966,24 +967,36 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         toast.error(`No se encontraron DNI en "${file.name}"`);
         return;
       }
-      // Cabecera del Excel: la institución como título y la fecha del campamento
-      const sugerencias: string[] = [];
-      if (parsed.organizacion && !openListRef.current && !listTitleRef.current.trim()) {
+      // Cabecera del Excel: el título es la institución y el horario sale de
+      // "Fecha Campamento" (dos fechas = estadía, una = full day). Se toman
+      // siempre del archivo, aunque la lista ya exista.
+      const tomados: string[] = [];
+      if (parsed.organizacion) {
         setListTitle(parsed.organizacion);
         listTitleRef.current = parsed.organizacion;
-        sugerencias.push(`título "${parsed.organizacion}"`);
+        tomados.push(`título "${parsed.organizacion}"`);
       }
-      if (parsed.fechas && !horarioRef.current.fecha_inicio) {
+      if (parsed.fechas) {
         const { inicio, fin } = parsed.fechas;
         const modalidad: Modalidad = fin && fin !== inicio ? "estadia" : "full_day";
         await cambiarHorario({ modalidad, fecha_inicio: inicio, fecha_fin: fin ?? inicio });
-        sugerencias.push(
-          `${HORARIO[modalidad].nombre.toLowerCase()} del ${format(new Date(inicio + "T12:00"), "dd/MM")}` +
-            (fin && fin !== inicio ? ` al ${format(new Date(fin + "T12:00"), "dd/MM")}` : "")
+        tomados.push(
+          `${HORARIO[modalidad].nombre.toLowerCase()} del ${format(new Date(inicio + "T12:00"), "dd/MM/yyyy")}` +
+            (fin && fin !== inicio ? ` al ${format(new Date(fin + "T12:00"), "dd/MM/yyyy")}` : "")
         );
       }
       await savePadron(parsed);
-      if (sugerencias.length) toast(`Del Excel: ${sugerencias.join(" y ")}. Revísalo debajo del título.`);
+      // Si la lista ya existía, se guarda el título del Excel
+      const abierta = openListRef.current;
+      if (parsed.organizacion && abierta && abierta.title !== parsed.organizacion) {
+        const { error } = await supabase
+          .from("scan_lists")
+          .update({ title: parsed.organizacion })
+          .eq("id", abierta.id);
+        if (error) toast.error("No se pudo guardar el título: " + error.message);
+        else openListRef.current = { ...abierta, title: parsed.organizacion };
+      }
+      if (tomados.length) toast(`Del Excel: ${tomados.join(" y ")}.`);
       // padronRef se actualiza en el próximo render; se fija ya para que la
       // lectura en espera se valide contra la lista recién subida
       padronRef.current = new Map(parsed.personas.map((p) => [p.dni, p.nombre]));
