@@ -131,7 +131,7 @@ export type Database = {
           },
         ]
       }
-      lugares: {
+      centros: {
         Row: {
           activo: boolean
           created_at: string
@@ -154,6 +154,38 @@ export type Database = {
           nombre?: string
         }
         Relationships: []
+      }
+      lugares: {
+        Row: {
+          activo: boolean
+          centro_id: string
+          created_at: string
+          id: string
+          nombre: string
+        }
+        Insert: {
+          activo?: boolean
+          centro_id: string
+          created_at?: string
+          id?: string
+          nombre: string
+        }
+        Update: {
+          activo?: boolean
+          centro_id?: string
+          created_at?: string
+          id?: string
+          nombre?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lugares_centro_id_fkey"
+            columns: ["centro_id"]
+            isOneToOne: false
+            referencedRelation: "centros"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       marcas: {
         Row: {
@@ -321,6 +353,7 @@ export type Database = {
       }
       scan_lists: {
         Row: {
+          centro_id: string | null
           closed_at: string | null
           created_at: string
           estadia_fin_at: string | null
@@ -332,6 +365,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          centro_id?: string | null
           closed_at?: string | null
           created_at?: string
           estadia_fin_at?: string | null
@@ -343,6 +377,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          centro_id?: string | null
           closed_at?: string | null
           created_at?: string
           estadia_fin_at?: string | null
@@ -354,6 +389,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "scan_lists_centro_id_fkey"
+            columns: ["centro_id"]
+            isOneToOne: false
+            referencedRelation: "centros"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "scan_lists_lugar_id_fkey"
             columns: ["lugar_id"]
@@ -489,14 +531,14 @@ export type Database = {
         Returns: undefined
       }
       es_rrhh: { Args: Record<PropertyKey, never>; Returns: boolean }
-      estado_puerta: { Args: { p_lugar_id: string }; Returns: Json }
+      estado_puerta: { Args: { p_centro_id: string }; Returns: Json }
       marcar_asistencia: {
         Args: { p_dni: string; p_tipo?: string }
         Returns: Json
       }
       mi_rol: { Args: Record<PropertyKey, never>; Returns: string }
       registrar_movimiento: {
-        Args: { p_dni: string; p_lugar_id: string; p_motivo?: string }
+        Args: { p_centro_id: string; p_dni: string; p_motivo?: string }
         Returns: Json
       }
       registrar_marca_manual: {

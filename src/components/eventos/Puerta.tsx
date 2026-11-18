@@ -37,7 +37,7 @@ import {
   sonido,
   vencimiento,
   type EstadoPuerta,
-  type Lugar,
+  type Centro,
 } from "@/lib/estadia";
 
 type Lectura =
@@ -47,20 +47,21 @@ type Lectura =
       dni: string;
       nombre: string;
       lista: string;
+      lugar?: string | null;
       at: string;
       salidaAt?: string | null;
       salidaMotivo?: string | null;
       tarde?: boolean;
     }
   | { estado: "repetido"; dni: string; nombre: string; lista: string; tipo: string }
-  | { estado: "no_pertenece"; dni: string; nombre?: string; otroLugar?: string; lista?: string }
+  | { estado: "no_pertenece"; dni: string; nombre?: string; otroCentro?: string; lista?: string }
   | { estado: "error"; dni: string; mensaje: string };
 
-const lugarKey = "puerta:lugar";
+const centroKey = "puerta:centro";
 
-const leerLugar = () => {
+const leerCentro = () => {
   try {
-    return localStorage.getItem(lugarKey);
+    return localStorage.getItem(centroKey);
   } catch {
     return null;
   }
@@ -72,34 +73,34 @@ const isTouch =
 export const Puerta = ({
   active,
   isAdmin,
-  lugares,
-  onAdministrarLugares,
+  centros,
+  onAdministrar,
   onVencidos,
 }: {
   // La pestaña está a la vista (el componente sigue montado para avisar a las 23:00)
   active: boolean;
   isAdmin: boolean;
-  lugares: Lugar[];
-  onAdministrarLugares: () => void;
+  centros: Centro[];
+  onAdministrar: () => void;
   onVencidos: (n: number) => void;
 }) => {
-  const activos = useMemo(() => lugares.filter((l) => l.activo), [lugares]);
-  const [lugarId, setLugarId] = useState<string | null>(leerLugar);
-  const lugar = lugares.find((l) => l.id === lugarId) ?? null;
-  const horaLimite = lugar?.hora_limite ?? "23:00";
+  const activos = useMemo(() => centros.filter((l) => l.activo), [centros]);
+  const [centroId, setLugarId] = useState<string | null>(leerCentro);
+  const centro = centros.find((l) => l.id === centroId) ?? null;
+  const horaLimite = centro?.hora_limite ?? "23:00";
 
-  // Si el lugar recordado ya no existe, se elige el único disponible
+  // Si el centro recordado ya no existe, se elige el único disponible
   useEffect(() => {
-    if (lugares.length === 0) return;
-    if (!lugar && activos.length === 1) elegirLugar(activos[0].id);
-  }, [lugares]);
+    if (centros.length === 0) return;
+    if (!centro && activos.length === 1) elegirCentro(activos[0].id);
+  }, [centros]);
 
-  const elegirLugar = (id: string) => {
+  const elegirCentro = (id: string) => {
     setLugarId(id);
     setEstado(null);
     setLectura(null);
     try {
-      localStorage.setItem(lugarKey, id);
+      localStorage.setItem(centroKey, id);
     } catch {}
   };
 
@@ -107,18 +108,18 @@ export const Puerta = ({
   const [cargando, setCargando] = useState(false);
   const [ahora, setAhora] = useState(() => new Date());
 
-  const lugarRef = useRef(lugarId);
-  lugarRef.current = lugarId;
+  const centroRef = useRef(centroId);
+  centroRef.current = centroId;
 
   const cargar = async () => {
-    const id = lugarRef.current;
+    const id = centroRef.current;
     if (!id) return;
-    const { data, error } = await supabase.rpc("estado_puerta", { p_lugar_id: id });
+    const { data, error } = await supabase.rpc("estado_puerta", { p_centro_id: id });
     if (error) {
       console.error(error);
       return;
     }
-    if (lugarRef.current === id) setEstado(data as unknown as EstadoPuerta);
+    if (centroRef.current === id) setEstado(data as unknown as EstadoPuerta);
   };
 
   // Recarga agrupada: varias lecturas seguidas generan una sola consulta
@@ -129,13 +130,13 @@ export const Puerta = ({
   };
 
   useEffect(() => {
-    if (!lugarId) return;
+    if (!centroId) return;
     setCargando(true);
     cargar().finally(() => setCargando(false));
 
-    // Otros equipos en la misma puerta (o en otra puerta del mismo lugar)
+    // Otros equipos en la misma puerta (o en otra puerta del mismo centro)
     const channel = supabase
-      .channel(`puerta-${lugarId}-${Math.random().toString(36).slice(2)}`)
+      .channel(`puerta-${centroId}-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "movimientos" }, recargar)
       .on("postgres_changes", { event: "*", schema: "public", table: "scan_lists" }, recargar)
       .subscribe();
@@ -160,7 +161,7 @@ export const Puerta = ({
       document.removeEventListener("visibilitychange", onVisible);
       supabase.removeChannel(channel);
     };
-  }, [lugarId]);
+  }, [centroId]);
 
   // ================== Quiénes están fuera ==================
   const fuera = useMemo(() => {
@@ -220,8 +221,8 @@ export const Puerta = ({
   };
 
   useEffect(() => {
-    if (active && lugarId) focusScan();
-  }, [active, lugarId]);
+    if (active && centroId) focusScan();
+  }, [active, centroId]);
 
   const mostrar = (l: Lectura) => {
     setLectura(l);
@@ -229,7 +230,7 @@ export const Puerta = ({
   };
 
   const procesar = async (raw: string) => {
-    const id = lugarRef.current;
+    const id = centroRef.current;
     if (!id) return;
     const dni = extractDniFromBarcode(raw);
     if (!dni) {
@@ -241,7 +242,7 @@ export const Puerta = ({
     setProcesando(true);
     try {
       const { data, error } = await supabase.rpc("registrar_movimiento", {
-        p_lugar_id: id,
+        p_centro_id: id,
         p_dni: dni,
       });
       if (error) throw error;
@@ -260,6 +261,7 @@ export const Puerta = ({
           dni,
           nombre: r.nombre,
           lista: r.lista,
+          lugar: r.lugar,
           at: r.created_at,
           salidaAt: r.salida_at,
           salidaMotivo: r.salida_motivo,
@@ -274,7 +276,7 @@ export const Puerta = ({
           estado: "no_pertenece",
           dni,
           nombre: r.nombre,
-          otroLugar: r.otro_lugar,
+          otroCentro: r.otro_centro,
           lista: r.lista,
         });
       } else {
@@ -292,11 +294,11 @@ export const Puerta = ({
 
   const encolar = (raw: string) => {
     const code = raw.trim();
-    if (!code || !lugarRef.current) return;
+    if (!code || !centroRef.current) return;
     colaRef.current = colaRef.current.then(() => procesar(code));
   };
 
-  useBarcodeScanner(encolar, { enabled: active && !!lugarId });
+  useBarcodeScanner(encolar, { enabled: active && !!centroId });
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -328,20 +330,20 @@ export const Puerta = ({
   };
 
   // ================== Pantalla ==================
-  if (lugares.length === 0 || activos.length === 0) {
+  if (centros.length === 0 || activos.length === 0) {
     return (
       <div className="mx-auto max-w-md rounded-lg border-2 border-dashed px-6 py-14 text-center">
         <MapPin className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" strokeWidth={1.5} />
-        <p className="font-sign text-2xl font-bold">No hay lugares todavía</p>
+        <p className="font-sign text-2xl font-bold">No hay centros todavía</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {isAdmin
-            ? "Crea los lugares a donde van las listas para controlar la puerta."
-            : "Pide al administrador que cree los lugares."}
+            ? "Crea los centros a donde van las listas para controlar la puerta."
+            : "Pide al administrador que cree los centros."}
         </p>
         {isAdmin && (
-          <Button className="mt-5" onClick={onAdministrarLugares}>
+          <Button className="mt-5" onClick={onAdministrar}>
             <Settings2 className="mr-2 h-4 w-4" />
-            Crear lugares
+            Crear centros
           </Button>
         )}
       </div>
@@ -355,9 +357,9 @@ export const Puerta = ({
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1.5">
             <Label className="text-sm text-muted-foreground">Puerta de</Label>
-            <Select value={lugar ? lugarId! : undefined} onValueChange={elegirLugar}>
+            <Select value={centro ? centroId! : undefined} onValueChange={elegirCentro}>
               <SelectTrigger className="h-11 border-2 bg-card text-base font-semibold">
-                <SelectValue placeholder="Elige el lugar" />
+                <SelectValue placeholder="Elige el centro" />
               </SelectTrigger>
               <SelectContent>
                 {activos.map((l) => (
@@ -373,18 +375,18 @@ export const Puerta = ({
               variant="outline"
               size="icon"
               className="h-11 w-11 shrink-0"
-              onClick={onAdministrarLugares}
-              title="Administrar lugares"
-              aria-label="Administrar lugares"
+              onClick={onAdministrar}
+              title="Administrar centros y lugares"
+              aria-label="Administrar centros y lugares"
             >
               <Settings2 className="h-4 w-4" />
             </Button>
           )}
         </div>
 
-        {!lugar ? (
+        {!centro ? (
           <p className="rounded-lg border-2 border-dashed px-5 py-10 text-center text-muted-foreground">
-            Elige el lugar de esta puerta para empezar.
+            Elige el centro de esta puerta para empezar.
           </p>
         ) : (
           <>
@@ -463,14 +465,14 @@ export const Puerta = ({
 
             <p className="hidden text-sm leading-relaxed text-muted-foreground lg:block">
               Cada lectura alterna: si la persona estaba dentro se registra su salida, si estaba
-              fuera su regreso. Solo se aceptan acampantes de las listas activas de este lugar.
+              fuera su regreso. Solo se aceptan acampantes de las listas activas de este centro.
             </p>
           </>
         )}
       </div>
 
-      {/* ================== Estado del lugar ================== */}
-      {lugar && (
+      {/* ================== Estado del centro ================== */}
+      {centro && (
         <section className="min-w-0 space-y-5">
           {vencidos > 0 && (
             <div
@@ -534,7 +536,7 @@ export const Puerta = ({
             {fuera.length === 0 ? (
               <p className="px-6 py-12 text-center text-sm text-muted-foreground">
                 {total === 0
-                  ? "No hay acampantes en estadía en este lugar."
+                  ? "No hay acampantes en estadía en este centro."
                   : "Todos están dentro de las instalaciones."}
               </p>
             ) : (
@@ -557,7 +559,9 @@ export const Puerta = ({
                         {p.nombre}
                       </p>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">
-                        <span className="dni">{p.dni}</span> · {p.lista}
+                        <span className="dni">{p.dni}</span> ·{" "}
+                        {p.lugar && <span className="font-medium text-foreground">{p.lugar} · </span>}
+                        {p.lista}
                         {p.motivo && <> · {p.motivo}</>}
                       </p>
                     </div>
@@ -576,12 +580,15 @@ export const Puerta = ({
           {(estado?.listas.length ?? 0) > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-                Listas activas en {lugar.nombre}
+                Listas activas en {centro.nombre}
               </h3>
               <ul className="divide-y rounded-lg border bg-card">
                 {estado!.listas.map((l) => (
                   <li key={l.id} className="flex items-center gap-3 px-4 py-2.5">
-                    <p className="min-w-0 flex-1 truncate font-medium">{l.title}</p>
+                    <p className="min-w-0 flex-1 truncate font-medium">
+                      {l.lugar && <span className="text-muted-foreground">{l.lugar} · </span>}
+                      {l.title}
+                    </p>
                     {l.en_llegada && (
                       <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                         llegando
@@ -676,7 +683,7 @@ const Letrero = ({
       Icon = ArrowLeftFromLine;
       titulo = `Salió · ${format(new Date(lectura.at), "HH:mm")}`;
       nombre = lectura.nombre;
-      detalle = lectura.lista;
+      detalle = [lectura.lugar, lectura.lista].filter(Boolean).join(" · ");
       break;
     case "reingreso":
       cls = lectura.tarde ? "bg-destructive text-white" : "bg-success text-white";
@@ -685,7 +692,7 @@ const Letrero = ({
       nombre = lectura.nombre;
       detalle = (
         <>
-          {lectura.lista}
+          {[lectura.lugar, lectura.lista].filter(Boolean).join(" · ")}
           {lectura.salidaAt && (
             <>
               {" "}
@@ -706,12 +713,12 @@ const Letrero = ({
     case "no_pertenece":
       cls = "bg-destructive text-white";
       Icon = CircleX;
-      titulo = "No pertenece a este lugar";
+      titulo = "No pertenece a este centro";
       nombre = lectura.nombre || "No está en ninguna lista activa";
-      detalle = lectura.otroLugar
-        ? `Está en "${lectura.lista}" de ${lectura.otroLugar}`
+      detalle = lectura.otroCentro
+        ? `Está en "${lectura.lista}" de ${lectura.otroCentro}`
         : lectura.lista
-        ? `Está en "${lectura.lista}", que no tiene lugar asignado`
+        ? `Está en "${lectura.lista}", que no tiene centro asignado`
         : "No se registró.";
       break;
     case "error":

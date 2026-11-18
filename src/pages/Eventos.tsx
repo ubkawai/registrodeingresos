@@ -34,9 +34,9 @@ import {
 import { RecordsList } from "@/components/RecordsList";
 import { AdminUsers } from "@/components/AdminUsers";
 import { Puerta } from "@/components/eventos/Puerta";
-import { LugaresDialog } from "@/components/eventos/LugaresDialog";
+import { CentrosDialog } from "@/components/eventos/CentrosDialog";
 import { MovimientosLista } from "@/components/eventos/MovimientosLista";
-import { cargarLugares, etapaLista, type Lugar } from "@/lib/estadia";
+import { cargarCentrosYLugares, etapaLista, type Centro, type Lugar } from "@/lib/estadia";
 import { toast } from "sonner";
 import {
   ScanBarcode,
@@ -58,6 +58,7 @@ import {
   Trash2,
   Clock,
   DoorOpen,
+  Building2,
   MapPin,
   Settings2,
   Flag,
@@ -79,11 +80,12 @@ interface Record {
   fuente?: Fuente;
 }
 
-type OpenList = { id: string; title: string; lugar_id: string | null };
+type OpenList = { id: string; title: string; centro_id: string | null; lugar_id: string | null };
 
 const toOpenList = (row: any): OpenList => ({
   id: row.id,
   title: row.title,
+  centro_id: row.centro_id ?? null,
   lugar_id: row.lugar_id ?? null,
 });
 
@@ -142,33 +144,59 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const showSavedLists = view === "listas";
   const isAdmin = role === "admin";
   const [listSearch, setListSearch] = useState("");
-  const [lugarFiltro, setLugarFiltro] = useState<string>("todos");
+  const [centroFiltro, setCentroFiltro] = useState<string>("todos");
 
-  // ====== Lugares (a dónde va cada lista) ======
+  // ====== Centros y lugares (a dónde va cada lista) ======
+  const [centros, setCentros] = useState<Centro[]>([]);
   const [lugares, setLugares] = useState<Lugar[]>([]);
+  const centrosActivos = useMemo(() => centros.filter((c) => c.activo), [centros]);
   const lugaresActivos = useMemo(() => lugares.filter((l) => l.activo), [lugares]);
+  const lugaresDe = (cId: string | null) => lugaresActivos.filter((l) => l.centro_id === cId);
+  const centrosActivosRef = useRef<Centro[]>([]);
+  centrosActivosRef.current = centrosActivos;
   const lugaresActivosRef = useRef<Lugar[]>([]);
   lugaresActivosRef.current = lugaresActivos;
   const [lugaresOpen, setLugaresOpen] = useState(false);
-  // Lugar de la lista en curso (o el elegido antes de la primera lectura)
+  // Destino de la lista en curso (o el elegido antes de la primera lectura)
+  const [centroId, setCentroId] = useState<string | null>(null);
+  const centroIdRef = useRef<string | null>(null);
+  centroIdRef.current = centroId;
   const [lugarId, setLugarId] = useState<string | null>(null);
   const lugarIdRef = useRef<string | null>(null);
   lugarIdRef.current = lugarId;
   const [askLugar, setAskLugar] = useState(false);
+  // Centro elegido en el aviso, mientras se elige su lugar
+  const [askCentro, setAskCentro] = useState<string | null>(null);
+
+  // Falta el destino: el centro, o el lugar si el centro tiene lugares
+  const faltaDestino = () => {
+    if (centrosActivosRef.current.length === 0) return false;
+    if (!centroIdRef.current) return true;
+    const tieneLugares = lugaresActivosRef.current.some((l) => l.centro_id === centroIdRef.current);
+    return tieneLugares && !lugarIdRef.current;
+  };
   const [vencidosPuerta, setVencidosPuerta] = useState(0);
   const [finalizarOpen, setFinalizarOpen] = useState(false);
 
   const recargarLugares = () =>
-    cargarLugares()
-      .then(setLugares)
-      .catch((e) => toast.error("No se pudieron cargar los lugares: " + e.message));
+    cargarCentrosYLugares()
+      .then((r) => {
+        setCentros(r.centros);
+        setLugares(r.lugares);
+      })
+      .catch((e) => toast.error("No se pudieron cargar los centros: " + e.message));
 
   useEffect(() => {
     if (session) recargarLugares();
   }, [session]);
 
-  const nombreLugar = (id: string | null | undefined) =>
-    lugares.find((l) => l.id === id)?.nombre ?? "";
+  // "Kawai · Casona"
+  const nombreDestino = (cId: string | null | undefined, lId: string | null | undefined) =>
+    [centros.find((c) => c.id === cId)?.nombre, lugares.find((l) => l.id === lId)?.nombre]
+      .filter(Boolean)
+      .join(" · ");
+
+  const destinoCompleto = !!centroId && (lugaresDe(centroId).length === 0 || !!lugarId);
 
   // Lista abierta en la BD: cada lectura se guarda en ella al instante y los
   // demás equipos con la misma cuenta la reciben por Realtime.
@@ -259,6 +287,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     setOpenList(list);
     if (!titleFocusedRef.current) setListTitle(list?.title ?? "");
     if (list) {
+      centroIdRef.current = list.centro_id;
+      setCentroId(list.centro_id);
       lugarIdRef.current = list.lugar_id;
       setLugarId(list.lugar_id);
     }
@@ -266,6 +296,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
   const resetOpenList = () => {
     applyOpenList(null);
+    centroIdRef.current = null;
+    setCentroId(null);
     lugarIdRef.current = null;
     setLugarId(null);
     setPadron(null);
@@ -331,7 +363,12 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     const title = listTitleRef.current.trim() || defaultTitle();
     const { data, error } = await supabase
       .from("scan_lists")
-      .insert({ title, user_id: userId!, lugar_id: lugarIdRef.current })
+      .insert({
+        title,
+        user_id: userId!,
+        centro_id: centroIdRef.current,
+        lugar_id: lugarIdRef.current,
+      })
       .select()
       .single();
 
@@ -582,9 +619,10 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     const code = raw.trim();
     if (!code) return;
 
-    // Antes de la primera lectura se pide el lugar de destino de la lista
-    if (!lugarIdRef.current && lugaresActivosRef.current.length > 0 && recordsRef.current.length === 0) {
+    // Antes de la primera lectura se pide el destino de la lista (centro y lugar)
+    if (faltaDestino() && recordsRef.current.length === 0) {
       pendingCodeRef.current = { code, at: Date.now() };
+      setAskCentro(centroIdRef.current);
       setAskLugar(true);
       return;
     }
@@ -607,27 +645,48 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     if (pending && Date.now() - pending.at < 2 * 60 * 1000) runCode(pending.code);
   };
 
-  // Lugar de la lista: si ya existe se guarda al instante (los otros equipos
+  // Destino de la lista: si ya existe se guarda al instante (los otros equipos
   // lo reciben); si no, se usa al crearla con la primera lectura
-  const cambiarLugar = async (id: string) => {
-    const anterior = lugarIdRef.current;
-    lugarIdRef.current = id;
-    setLugarId(id);
+  const cambiarDestino = async (cId: string | null, lId: string | null) => {
+    const antes = { c: centroIdRef.current, l: lugarIdRef.current };
+    centroIdRef.current = cId;
+    setCentroId(cId);
+    lugarIdRef.current = lId;
+    setLugarId(lId);
     const list = openListRef.current;
     if (!list) return;
-    const { error } = await supabase.from("scan_lists").update({ lugar_id: id }).eq("id", list.id);
+    const { error } = await supabase
+      .from("scan_lists")
+      .update({ centro_id: cId, lugar_id: lId })
+      .eq("id", list.id);
     if (error) {
-      lugarIdRef.current = anterior;
-      setLugarId(anterior);
-      toast.error("No se pudo cambiar el lugar: " + error.message);
+      centroIdRef.current = antes.c;
+      setCentroId(antes.c);
+      lugarIdRef.current = antes.l;
+      setLugarId(antes.l);
+      toast.error("No se pudo cambiar el destino: " + error.message);
       return;
     }
-    openListRef.current = { ...list, lugar_id: id };
+    openListRef.current = { ...list, centro_id: cId, lugar_id: lId };
   };
 
-  const elegirLugarYSeguir = async (id: string) => {
+  // Al cambiar de centro se quita el lugar si no es de ese centro
+  const cambiarCentro = (cId: string) => {
+    const lugar = lugares.find((l) => l.id === lugarIdRef.current);
+    cambiarDestino(cId, lugar?.centro_id === cId ? lugar.id : null);
+  };
+
+  const cambiarLugar = (lId: string) => cambiarDestino(centroIdRef.current, lId);
+
+  // Paso 1 del aviso: el centro. Si tiene lugares se pasa al paso 2.
+  const elegirCentroEnAviso = (cId: string) => {
+    if (lugaresDe(cId).length > 0) setAskCentro(cId);
+    else elegirDestinoYSeguir(cId, null);
+  };
+
+  const elegirDestinoYSeguir = async (cId: string, lId: string | null) => {
     setAskLugar(false);
-    await cambiarLugar(id);
+    await cambiarDestino(cId, lId);
     // Sigue el flujo normal con la lectura en espera (puede pedir el padrón)
     const pending = pendingCodeRef.current;
     pendingCodeRef.current = null;
@@ -705,8 +764,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const cerrarLista = async (conEstadia: boolean) => {
     const list = openListRef.current;
     if (!list) return;
-    if (conEstadia && !lugarIdRef.current) {
-      toast.error("Elige el lugar de destino para controlar la estadía");
+    if (conEstadia && (!centroIdRef.current || faltaDestino())) {
+      toast.error("Elige el centro y el lugar de destino para controlar la estadía");
       return;
     }
     setFinalizarOpen(false);
@@ -727,7 +786,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
       toast.success(
         conEstadia
-          ? `Llegada cerrada. "${listTitle.trim()}" está en estadía en ${nombreLugar(lugarIdRef.current)}`
+          ? `Llegada cerrada. "${listTitle.trim()}" está en estadía en ${nombreDestino(centroIdRef.current, lugarIdRef.current)}`
           : "Lista finalizada"
       );
       resetOpenList();
@@ -800,8 +859,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
   // Fin de la estadía: la lista deja de contar en la puerta
   const terminarEstadia = async (list: any) => {
-    const { data: fuera } = list.lugar_id
-      ? await supabase.rpc("estado_puerta", { p_lugar_id: list.lugar_id })
+    const { data: fuera } = list.centro_id
+      ? await supabase.rpc("estado_puerta", { p_centro_id: list.centro_id })
       : { data: null };
     const pendientes = ((fuera as any)?.fuera ?? []).filter((p: any) => p.lista_id === list.id);
     const aviso = pendientes.length
@@ -850,10 +909,10 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const filteredLists = useMemo(() => {
     const q = listSearch.trim().toLowerCase();
     const porLugar =
-      lugarFiltro === "todos"
+      centroFiltro === "todos"
         ? savedLists
         : savedLists.filter((l) =>
-            lugarFiltro === "ninguno" ? !l.lugar_id : l.lugar_id === lugarFiltro
+            centroFiltro === "ninguno" ? !l.centro_id : l.centro_id === centroFiltro
           );
     // Primero las que están en estadía
     const ordenadas = [...porLugar].sort(
@@ -868,7 +927,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
             r.dni_number.includes(q) || r.full_name.toLowerCase().includes(q)
         )
     );
-  }, [savedLists, listSearch, lugarFiltro]);
+  }, [savedLists, listSearch, centroFiltro]);
 
   const scannerStatus = lookupLoading
     ? { text: "Consultando…", dot: "bg-warning", pulse: true }
@@ -949,7 +1008,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
               {isAdmin && (
                 <DropdownMenuItem onSelect={() => setLugaresOpen(true)}>
                   <MapPin className="mr-2 h-4 w-4" />
-                  Lugares
+                  Centros y lugares
                 </DropdownMenuItem>
               )}
               {onCambiarModulo && (
@@ -997,7 +1056,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ================== ¿A qué lugar va la lista? ================== */}
+      {/* ================== ¿A dónde va la lista? (centro y lugar) ================== */}
       <AlertDialog
         open={askLugar}
         onOpenChange={(open) => {
@@ -1011,26 +1070,44 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         <AlertDialogContent className="max-w-md rounded-lg">
           <AlertDialogHeader>
             <AlertDialogTitle className="font-sign text-2xl font-bold">
-              ¿A qué lugar va esta lista?
+              {askCentro ? `¿En qué lugar de ${nombreDestino(askCentro, null)}?` : "¿A qué centro va esta lista?"}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-base">
-              El lugar define en qué puerta se controlan las salidas y los regresos. El DNI que
-              escaneaste se registrará al elegirlo.
+              {askCentro
+                ? "Elige el alojamiento del grupo. El DNI que escaneaste se registrará al elegirlo."
+                : "El centro define en qué puerta se controlan las salidas y los regresos. Luego eliges el lugar."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="grid gap-2">
-            {lugaresActivos.map((l) => (
-              <Button
-                key={l.id}
-                variant="outline"
-                className="h-12 justify-start rounded-md text-base"
-                onClick={() => elegirLugarYSeguir(l.id)}
-              >
-                <MapPin className="mr-2 h-4 w-4 text-primary" />
-                {l.nombre}
-              </Button>
-            ))}
+          <div className="grid max-h-[50vh] gap-2 overflow-y-auto">
+            {askCentro
+              ? lugaresDe(askCentro).map((l) => (
+                  <Button
+                    key={l.id}
+                    variant="outline"
+                    className="h-12 justify-start rounded-md text-base"
+                    onClick={() => elegirDestinoYSeguir(askCentro, l.id)}
+                  >
+                    <MapPin className="mr-2 h-4 w-4 text-primary" />
+                    {l.nombre}
+                  </Button>
+                ))
+              : centrosActivos.map((c) => (
+                  <Button
+                    key={c.id}
+                    variant="outline"
+                    className="h-12 justify-start rounded-md text-base"
+                    onClick={() => elegirCentroEnAviso(c.id)}
+                  >
+                    <Building2 className="mr-2 h-4 w-4 text-primary" />
+                    {c.nombre}
+                  </Button>
+                ))}
           </div>
+          {askCentro && (
+            <Button variant="ghost" className="justify-start" onClick={() => setAskCentro(null)}>
+              ← Cambiar de centro
+            </Button>
+          )}
         </AlertDialogContent>
       </AlertDialog>
 
@@ -1042,16 +1119,16 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
               Cerrar la llegada
             </AlertDialogTitle>
             <AlertDialogDescription className="text-base">
-              {lugarId
-                ? `Si el grupo se queda en ${nombreLugar(lugarId)}, pásalo a estadía para controlar sus salidas y regresos en la Puerta.`
-                : "Esta lista no tiene lugar de destino, así que no se pueden controlar salidas. Elige un lugar en la lista para habilitar la estadía."}
+              {destinoCompleto
+                ? `Si el grupo se queda en ${nombreDestino(centroId, lugarId)}, pásalo a estadía para controlar sus salidas y regresos en la Puerta.`
+                : "Esta lista no tiene centro y lugar de destino, así que no se pueden controlar salidas. Elígelos debajo del título para habilitar la estadía."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="grid gap-2">
             <Button
               className="h-auto justify-start rounded-md px-4 py-3 text-left"
               onClick={() => cerrarLista(true)}
-              disabled={!lugarId}
+              disabled={!destinoCompleto}
               autoFocus
             >
               <DoorOpen className="mr-3 h-5 w-5 shrink-0" />
@@ -1083,9 +1160,10 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       </AlertDialog>
 
       {isAdmin && (
-        <LugaresDialog
+        <CentrosDialog
           open={lugaresOpen}
           onOpenChange={setLugaresOpen}
+          centros={centros}
           lugares={lugares}
           onCambio={recargarLugares}
         />
@@ -1097,8 +1175,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           <Puerta
             active={view === "puerta" && !lugaresOpen}
             isAdmin={isAdmin}
-            lugares={lugares}
-            onAdministrarLugares={() => setLugaresOpen(true)}
+            centros={centros}
+            onAdministrar={() => setLugaresOpen(true)}
             onVencidos={setVencidosPuerta}
           />
         </div>
@@ -1300,25 +1378,47 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                     className="font-sign w-full rounded-sm bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50"
                     title="Título de la lista (clic para editar)"
                   />
-                  {lugaresActivos.length > 0 || lugarId ? (
-                    <Select value={lugarId ?? undefined} onValueChange={cambiarLugar}>
-                      <SelectTrigger
-                        className="mt-1 h-8 w-auto max-w-full gap-1.5 border-0 bg-transparent px-0 text-sm font-medium shadow-none focus:ring-0 focus:ring-offset-0 [&>span]:truncate"
-                        aria-label="Lugar de destino"
-                      >
-                        <MapPin className={cn("h-4 w-4 shrink-0", lugarId ? "text-primary" : "text-muted-foreground")} />
-                        <SelectValue placeholder="Elegir lugar de destino" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {lugares
-                          .filter((l) => l.activo || l.id === lugarId)
-                          .map((l) => (
-                            <SelectItem key={l.id} value={l.id}>
-                              {l.nombre}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                  {centrosActivos.length > 0 || centroId ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4">
+                      <Select value={centroId ?? undefined} onValueChange={cambiarCentro}>
+                        <SelectTrigger
+                          className="h-8 w-auto max-w-full gap-1.5 border-0 bg-transparent px-0 text-sm font-medium shadow-none focus:ring-0 focus:ring-offset-0 [&>span]:truncate"
+                          aria-label="Centro de destino"
+                        >
+                          <Building2 className={cn("h-4 w-4 shrink-0", centroId ? "text-primary" : "text-muted-foreground")} />
+                          <SelectValue placeholder="Elegir centro" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {centros
+                            .filter((c) => c.activo || c.id === centroId)
+                            .map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.nombre}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {centroId && (lugaresDe(centroId).length > 0 || lugarId) && (
+                        <Select value={lugarId ?? undefined} onValueChange={cambiarLugar}>
+                          <SelectTrigger
+                            className="h-8 w-auto max-w-full gap-1.5 border-0 bg-transparent px-0 text-sm font-medium shadow-none focus:ring-0 focus:ring-offset-0 [&>span]:truncate"
+                            aria-label="Lugar de destino"
+                          >
+                            <MapPin className={cn("h-4 w-4 shrink-0", lugarId ? "text-primary" : "text-destructive")} />
+                            <SelectValue placeholder="Elegir lugar" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {lugares
+                              .filter((l) => l.centro_id === centroId && (l.activo || l.id === lugarId))
+                              .map((l) => (
+                                <SelectItem key={l.id} value={l.id}>
+                                  {l.nombre}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
                   ) : (
                     isAdmin && (
                       <button
@@ -1327,7 +1427,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                         className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
                       >
                         <Settings2 className="h-4 w-4" />
-                        Crear lugares de destino
+                        Crear centros y lugares
                       </button>
                     )
                   )}
@@ -1413,22 +1513,22 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
-              {lugares.length > 0 && (
-                <Select value={lugarFiltro} onValueChange={setLugarFiltro}>
+              {centros.length > 0 && (
+                <Select value={centroFiltro} onValueChange={setCentroFiltro}>
                   <SelectTrigger
                     className="h-10 rounded-md border-2 bg-card sm:w-48"
-                    aria-label="Filtrar por lugar"
+                    aria-label="Filtrar por centro"
                   >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="todos">Todos los lugares</SelectItem>
-                    {lugares.map((l) => (
-                      <SelectItem key={l.id} value={l.id}>
-                        {l.nombre}
+                    <SelectItem value="todos">Todos los centros</SelectItem>
+                    {centros.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.nombre}
                       </SelectItem>
                     ))}
-                    <SelectItem value="ninguno">Sin lugar</SelectItem>
+                    <SelectItem value="ninguno">Sin centro</SelectItem>
                   </SelectContent>
                 </Select>
               )}
@@ -1459,7 +1559,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                     ? (list.scanned_records || []).filter((r: Record) => dnis.has(r.dni_number)).length
                     : 0;
                   const etapa = etapaLista(list);
-                  const lugarLista = lugares.find((l) => l.id === list.lugar_id) ?? null;
+                  const centroLista = centros.find((c) => c.id === list.centro_id) ?? null;
+                  const destino = nombreDestino(list.centro_id, list.lugar_id);
                   // Tuvo estadía si no se finalizó en el mismo momento que se cerró la llegada
                   const tuvoEstadia =
                     etapa === "estadia" ||
@@ -1477,10 +1578,10 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                             )}
                           </p>
                           <p className="truncate text-sm text-muted-foreground">
-                            {lugarLista && (
+                            {destino && (
                               <>
                                 <MapPin className="-mt-0.5 mr-1 inline h-3.5 w-3.5" />
-                                {lugarLista.nombre} ·{" "}
+                                {destino} ·{" "}
                               </>
                             )}
                             {format(new Date(list.created_at), "d 'de' MMMM yyyy, HH:mm", {
@@ -1532,7 +1633,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                               <MovimientosLista
                                 listaId={list.id}
                                 titulo={list.title}
-                                lugar={lugarLista}
+                                centro={centroLista}
+                                lugar={nombreDestino(null, list.lugar_id)}
                               />
                             </div>
                           )}

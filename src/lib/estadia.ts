@@ -1,13 +1,22 @@
 import { format } from "date-fns";
 import { supabase } from "@/integrations/client";
 
-// Estadía de los acampantes: lugares, salidas y reingresos en la puerta.
+// Estadía de los acampantes: centros, lugares, salidas y reingresos en la puerta.
 // Los movimientos solo se crean con la función SQL registrar_movimiento.
 
-export type Lugar = {
+// Centro (ej. Kawai, Killay): tiene la puerta y la hora límite
+export type Centro = {
   id: string;
   nombre: string;
   hora_limite: string; // "23:00:00"
+  activo: boolean;
+};
+
+// Lugar o alojamiento dentro de un centro (ej. Tambo II, Casa A1)
+export type Lugar = {
+  id: string;
+  centro_id: string;
+  nombre: string;
   activo: boolean;
 };
 
@@ -24,6 +33,7 @@ export type Movimiento = {
 export type ListaPuerta = {
   id: string;
   title: string;
+  lugar: string | null;
   created_at: string;
   en_llegada: boolean;
   total: number;
@@ -36,6 +46,7 @@ export type PersonaFuera = {
   nombre: string;
   lista_id: string;
   lista: string;
+  lugar: string | null;
   salida_at: string;
   motivo: string | null;
 };
@@ -52,10 +63,14 @@ export const MOTIVOS_RAPIDOS = ["Compras", "Salud", "Permiso familiar", "Trabajo
 
 export const horaCorta = (hora: string | null | undefined) => (hora ?? "23:00").slice(0, 5);
 
-export const cargarLugares = async (): Promise<Lugar[]> => {
-  const { data, error } = await supabase.from("lugares").select("*").order("nombre");
-  if (error) throw error;
-  return (data ?? []) as Lugar[];
+export const cargarCentrosYLugares = async (): Promise<{ centros: Centro[]; lugares: Lugar[] }> => {
+  const [c, l] = await Promise.all([
+    supabase.from("centros").select("*").order("nombre"),
+    supabase.from("lugares").select("*").order("nombre"),
+  ]);
+  if (c.error) throw c.error;
+  if (l.error) throw l.error;
+  return { centros: (c.data ?? []) as Centro[], lugares: (l.data ?? []) as Lugar[] };
 };
 
 // Hora a la que debía regresar quien salió en `salidaIso`.
@@ -139,12 +154,14 @@ const fh = (iso: string) => format(new Date(iso), "dd/MM/yyyy HH:mm");
 // Una fila por salida, con su reingreso (si lo hubo) y el tiempo fuera
 export const filasMovimientos = (
   lista: string,
+  centro: string,
   lugar: string,
   horaLimite: string | null,
   movs: Movimiento[]
 ): unknown[][] => {
   const filas: unknown[][] = [
     ["Lista", lista],
+    ["Centro", centro || "(sin centro)"],
     ["Lugar", lugar || "(sin lugar)"],
     ["Hora límite", horaLimite ? horaCorta(horaLimite) : ""],
     ["Generado", format(new Date(), "dd/MM/yyyy HH:mm")],

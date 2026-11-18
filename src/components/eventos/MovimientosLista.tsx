@@ -11,7 +11,7 @@ import {
   filasMovimientos,
   salidasConReingreso,
   vencimiento,
-  type Lugar,
+  type Centro,
   type Movimiento,
 } from "@/lib/estadia";
 
@@ -19,11 +19,13 @@ import {
 export const MovimientosLista = ({
   listaId,
   titulo,
+  centro,
   lugar,
 }: {
   listaId: string;
   titulo: string;
-  lugar: Lugar | null;
+  centro: Centro | null;
+  lugar: string;
 }) => {
   const [movs, setMovs] = useState<Movimiento[] | null>(null);
 
@@ -44,7 +46,7 @@ export const MovimientosLista = ({
   }, [listaId]);
 
   const salidas = useMemo(() => (movs ? salidasConReingreso(movs).reverse() : []), [movs]);
-  const hora = lugar?.hora_limite ?? null;
+  const hora = centro?.hora_limite ?? null;
 
   if (!movs) {
     return (
@@ -82,7 +84,7 @@ export const MovimientosLista = ({
             onClick={() =>
               descargarCsv(
                 `salidas_${titulo.replace(/[^\w-]+/g, "_")}.csv`,
-                filasMovimientos(titulo, lugar?.nombre ?? "", hora, movs)
+                filasMovimientos(titulo, centro?.nombre ?? "", lugar, hora, movs)
               )
             }
           >
