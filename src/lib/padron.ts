@@ -4,7 +4,102 @@
 
 export type PersonaPadron = { dni: string; nombre: string };
 
-export type Padron = { personas: PersonaPadron[]; archivo: string };
+export type Padron = {
+  personas: PersonaPadron[];
+  archivo: string;
+  // Datos de la cabecera del Excel (no se guardan en el padrón; se usan para
+  // sugerir el título y las fechas de la lista)
+  organizacion?: string;
+  fechas?: { inicio: string; fin: string | null }; // "yyyy-mm-dd"
+};
+
+// ---------- Cabecera: "Institución u Organización:" y "Fecha Campamento:" ----------
+const MESES: { [k: string]: number } = {
+  ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, set: 9, sep: 9, oct: 10, nov: 11, dic: 12,
+};
+
+const ymd = (y: number, m: number, d: number) =>
+  m >= 1 && m <= 12 && d >= 1 && d <= 31
+    ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    : null;
+
+const ymdDate = (d: Date) => ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
+
+// Acepta una fecha de Excel o textos como "18/11/2026", "18/11/2026 al 20/11/2026",
+// "18 al 20/11/2026", "del 18 al 20 de noviembre de 2026"
+export const parseFechas = (v: Cell): { inicio: string; fin: string | null } | null => {
+  if (v instanceof Date) {
+    const d = ymdDate(v);
+    return d ? { inicio: d, fin: null } : null;
+  }
+  if (typeof v === "number" && v > 30000 && v < 80000) {
+    // Número de serie de Excel
+    const d = ymdDate(new Date(Math.round((v - 25569) * 86400_000) + new Date().getTimezoneOffset() * 60_000));
+    return d ? { inicio: d, fin: null } : null;
+  }
+  if (typeof v !== "string") return null;
+  const t = v.toLowerCase();
+  const anio = (s: string | undefined) => {
+    if (!s) return new Date().getFullYear();
+    const n = Number(s);
+    return n < 100 ? 2000 + n : n;
+  };
+
+  const completas = [...t.matchAll(/(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/g)].map((m) =>
+    ymd(anio(m[3]), Number(m[2]), Number(m[1]))
+  );
+  if (completas.length >= 2 && completas[0]) return { inicio: completas[0], fin: completas[completas.length - 1] };
+  if (completas.length === 1 && completas[0]) {
+    // "18 al 20/11/2026"
+    const r = t.match(/(\d{1,2})\s*(?:al|a|y|-)\s*\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/);
+    if (r) {
+      const [y, m] = completas[0].split("-").map(Number);
+      return { inicio: ymd(y, m, Number(r[1])) ?? completas[0], fin: completas[0] };
+    }
+    return { inicio: completas[0], fin: null };
+  }
+
+  // "18 al 20 de noviembre de 2026" / "18 de noviembre"
+  const r = t.match(
+    /(\d{1,2})(?:\s*(?:al|a|y|-)\s*(\d{1,2}))?\s*de\s*([a-zé]+)(?:\s*(?:de|del)?\s*(\d{4}))?/
+  );
+  if (r) {
+    const mes = MESES[r[3].slice(0, 3)];
+    if (!mes) return null;
+    const y = anio(r[4]);
+    const ini = ymd(y, mes, Number(r[1]));
+    if (!ini) return null;
+    return { inicio: ini, fin: r[2] ? ymd(y, mes, Number(r[2])) : null };
+  }
+  return null;
+};
+
+// Valor de una etiqueta de la cabecera: en la misma celda tras ":" o en la
+// siguiente celda con contenido de la fila
+const valorEtiqueta = (rows: Cell[][], etiqueta: RegExp): Cell => {
+  for (const row of rows.slice(0, 15)) {
+    for (let j = 0; j < row.length; j++) {
+      const txt = textCell(row[j]);
+      if (!etiqueta.test(txt)) continue;
+      const tras = txt.split(":").slice(1).join(":").trim();
+      if (tras) return tras;
+      for (let k = j + 1; k < row.length; k++) {
+        const v = row[k];
+        if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+      }
+    }
+  }
+  return null;
+};
+
+const parseCabecera = (rows: Cell[][]) => {
+  const org = valorEtiqueta(rows, /instituci|organizaci/i);
+  const fecha = valorEtiqueta(rows, /fecha/i);
+  return {
+    organizacion: typeof org === "string" ? org.trim() : org ? String(org) : undefined,
+    fechas: parseFechas(fecha) ?? undefined,
+  };
+};
 
 type Cell = string | number | boolean | Date | null | undefined;
 
@@ -156,20 +251,29 @@ const parsePdf = async (file: File): Promise<PersonaPadron[]> => {
 export const parsePadronFile = async (file: File): Promise<Padron> => {
   const name = file.name.toLowerCase();
   let personas: PersonaPadron[];
+  let cabecera: ReturnType<typeof parseCabecera> = { organizacion: undefined, fechas: undefined };
 
   if (name.endsWith(".pdf")) {
     personas = await parsePdf(file);
   } else if (name.endsWith(".csv") || name.endsWith(".txt")) {
-    personas = parseRows(parseCsv(await file.text()));
+    const rows = parseCsv(await file.text());
+    personas = parseRows(rows);
+    cabecera = parseCabecera(rows);
   } else if (name.endsWith(".xlsx")) {
     const { default: readXlsxFile } = await import("read-excel-file/browser");
     const sheets = await readXlsxFile(file);
     personas = sheets.flatMap((s) => parseRows(s.data as Cell[][]));
+    if (sheets[0]) cabecera = parseCabecera(sheets[0].data as Cell[][]);
   } else if (name.endsWith(".xls")) {
     throw new Error('Formato .xls antiguo: ábrelo en Excel y guárdalo como .xlsx');
   } else {
     throw new Error("Formato no soportado. Usa Excel (.xlsx), CSV o PDF");
   }
 
-  return { personas: dedupe(personas), archivo: file.name };
+  return {
+    personas: dedupe(personas),
+    archivo: file.name,
+    organizacion: cabecera.organizacion || undefined,
+    fechas: cabecera.fechas,
+  };
 };

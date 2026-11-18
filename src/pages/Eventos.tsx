@@ -39,9 +39,14 @@ import { MovimientosLista } from "@/components/eventos/MovimientosLista";
 import {
   cargarCentrosYLugares,
   etapaLista,
+  calcularHorario,
+  HORARIO,
+  textoHorario,
   type Bungalow,
   type Centro,
+  type Horario,
   type Lugar,
+  type Modalidad,
 } from "@/lib/estadia";
 import { toast } from "sonner";
 import {
@@ -69,6 +74,7 @@ import {
   Settings2,
   Flag,
   BedDouble,
+  CalendarDays,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -88,14 +94,26 @@ interface Record {
   bungalow_id?: string | null;
 }
 
-type OpenList = { id: string; title: string; centro_id: string | null; lugar_id: string | null };
+type OpenList = {
+  id: string;
+  title: string;
+  centro_id: string | null;
+  lugar_id: string | null;
+} & Horario;
 
 const toOpenList = (row: any): OpenList => ({
   id: row.id,
   title: row.title,
   centro_id: row.centro_id ?? null,
   lugar_id: row.lugar_id ?? null,
+  modalidad: row.modalidad ?? null,
+  fecha_inicio: row.fecha_inicio ?? null,
+  fecha_fin: row.fecha_fin ?? null,
 });
+
+const SIN_HORARIO: Horario = { modalidad: null, fecha_inicio: null, fecha_fin: null };
+
+const hoyYmd = () => format(new Date(), "yyyy-MM-dd");
 
 // Resultado de la lectura: pinta el letrero de veredicto
 type Estado = "ok" | "fuera" | "dup" | "error";
@@ -186,6 +204,11 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const lugarIdRef = useRef<string | null>(null);
   lugarIdRef.current = lugarId;
   const [askLugar, setAskLugar] = useState(false);
+  // Horario de la lista en curso (modalidad y fechas del campamento)
+  const [horario, setHorario] = useState<Horario>(SIN_HORARIO);
+  const horarioRef = useRef<Horario>(SIN_HORARIO);
+  horarioRef.current = horario;
+
   // Centro elegido en el aviso, mientras se elige su lugar
   const [askCentro, setAskCentro] = useState<string | null>(null);
 
@@ -350,6 +373,9 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       setCentroId(list.centro_id);
       lugarIdRef.current = list.lugar_id;
       setLugarId(list.lugar_id);
+      const h = { modalidad: list.modalidad, fecha_inicio: list.fecha_inicio, fecha_fin: list.fecha_fin };
+      horarioRef.current = h;
+      setHorario(h);
     }
   };
 
@@ -359,6 +385,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     setCentroId(null);
     lugarIdRef.current = null;
     setLugarId(null);
+    horarioRef.current = SIN_HORARIO;
+    setHorario(SIN_HORARIO);
     setPadron(null);
     setCurrentRecords([]);
     setLastRead(null);
@@ -374,6 +402,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       .from("scan_lists")
       .select(`*, scanned_records (*)`)
       .is("closed_at", null)
+      .eq("user_id", userId!)
       .order("created_at", { ascending: false })
       .order("scanned_at", { referencedTable: "scanned_records", ascending: true })
       .limit(1)
@@ -427,6 +456,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         user_id: userId!,
         centro_id: centroIdRef.current,
         lugar_id: lugarIdRef.current,
+        ...horarioRef.current,
+        ...calcularHorario(horarioRef.current),
       })
       .select()
       .single();
@@ -438,6 +469,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           .from("scan_lists")
           .select()
           .is("closed_at", null)
+          .eq("user_id", userId!)
           .maybeSingle();
         if (existing) {
           const list = toOpenList(existing);
@@ -672,6 +704,14 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
 
       if (fuera) toast.error(`No está en la lista: ${nombre}`);
       else toast.success(`Agregado: ${nombre}`);
+
+      // Llega un día antes de la fecha del campamento
+      const ini = horarioRef.current.fecha_inicio;
+      if (ini && hoyYmd() < ini) {
+        toast.warning(
+          `Llega antes de su fecha de ingreso (${format(new Date(ini + "T12:00"), "dd/MM")}). Revisa la fecha de la lista.`
+        );
+      }
     } catch (e: any) {
       console.error(e);
       seenDnisRef.current.delete(dni);
@@ -741,6 +781,28 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       return;
     }
     openListRef.current = { ...list, centro_id: cId, lugar_id: lId };
+  };
+
+  // Horario: si la lista ya existe se guarda al instante
+  const cambiarHorario = async (cambios: Partial<Horario>) => {
+    const antes = horarioRef.current;
+    const h = { ...antes, ...cambios };
+    if (h.modalidad === "full_day") h.fecha_fin = h.fecha_inicio;
+    horarioRef.current = h;
+    setHorario(h);
+    const list = openListRef.current;
+    if (!list) return;
+    const { error } = await supabase
+      .from("scan_lists")
+      .update({ ...h, ...calcularHorario(h) })
+      .eq("id", list.id);
+    if (error) {
+      horarioRef.current = antes;
+      setHorario(antes);
+      toast.error("No se pudo guardar el horario: " + error.message);
+      return;
+    }
+    openListRef.current = { ...list, ...h };
   };
 
   // Al cambiar de centro se quita el lugar si no es de ese centro
@@ -841,6 +903,11 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       toast.error("Elige el centro y el lugar de destino para controlar la estadía");
       return;
     }
+    if (conEstadia && horarioRef.current.modalidad === "estadia" && !horarioRef.current.fecha_fin) {
+      toast.error("Falta la fecha de salida de la estadía (debajo del título)");
+      setFinalizarOpen(false);
+      return;
+    }
     setFinalizarOpen(false);
     setLoading(true);
     closingRef.current = true;
@@ -899,7 +966,24 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
         toast.error(`No se encontraron DNI en "${file.name}"`);
         return;
       }
+      // Cabecera del Excel: la institución como título y la fecha del campamento
+      const sugerencias: string[] = [];
+      if (parsed.organizacion && !openListRef.current && !listTitleRef.current.trim()) {
+        setListTitle(parsed.organizacion);
+        listTitleRef.current = parsed.organizacion;
+        sugerencias.push(`título "${parsed.organizacion}"`);
+      }
+      if (parsed.fechas && !horarioRef.current.fecha_inicio) {
+        const { inicio, fin } = parsed.fechas;
+        const modalidad: Modalidad = fin && fin !== inicio ? "estadia" : "full_day";
+        await cambiarHorario({ modalidad, fecha_inicio: inicio, fecha_fin: fin ?? inicio });
+        sugerencias.push(
+          `${HORARIO[modalidad].nombre.toLowerCase()} del ${format(new Date(inicio + "T12:00"), "dd/MM")}` +
+            (fin && fin !== inicio ? ` al ${format(new Date(fin + "T12:00"), "dd/MM")}` : "")
+        );
+      }
       await savePadron(parsed);
+      if (sugerencias.length) toast(`Del Excel: ${sugerencias.join(" y ")}. Revísalo debajo del título.`);
       // padronRef se actualiza en el próximo render; se fija ya para que la
       // lectura en espera se valide contra la lista recién subida
       padronRef.current = new Map(parsed.personas.map((p) => [p.dni, p.nombre]));
@@ -1550,6 +1634,61 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                       </button>
                     )
                   )}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    <CalendarDays
+                      className={cn("h-4 w-4 shrink-0", horario.modalidad ? "text-primary" : "text-muted-foreground")}
+                    />
+                    <select
+                      value={horario.modalidad ?? ""}
+                      onChange={(e) =>
+                        cambiarHorario({
+                          modalidad: (e.target.value || null) as Modalidad | null,
+                          fecha_inicio: horario.fecha_inicio ?? hoyYmd(),
+                        })
+                      }
+                      className="h-8 rounded-md bg-transparent pr-1 font-medium outline-none focus:ring-2 focus:ring-ring"
+                      aria-label="Modalidad"
+                    >
+                      <option value="">Sin horario</option>
+                      <option value="estadia">Estadía (17:00 → 15:00)</option>
+                      <option value="full_day">Full day (09:00 → 17:00)</option>
+                    </select>
+                    {horario.modalidad && (
+                      <>
+                        <input
+                          type="date"
+                          value={horario.fecha_inicio ?? ""}
+                          onChange={(e) => {
+                            const ini = e.target.value || null;
+                            cambiarHorario({
+                              fecha_inicio: ini,
+                              // La salida no puede ser antes del ingreso
+                              fecha_fin:
+                                horario.fecha_fin && ini && horario.fecha_fin < ini ? ini : horario.fecha_fin,
+                            });
+                          }}
+                          className="h-8 rounded-md border bg-card px-1.5 text-sm"
+                          aria-label={horario.modalidad === "estadia" ? "Fecha de ingreso" : "Fecha"}
+                        />
+                        {horario.modalidad === "estadia" && (
+                          <>
+                            <span className="text-muted-foreground">al</span>
+                            <input
+                              type="date"
+                              value={horario.fecha_fin ?? ""}
+                              min={horario.fecha_inicio ?? undefined}
+                              onChange={(e) => cambiarHorario({ fecha_fin: e.target.value || null })}
+                              className={cn(
+                                "h-8 rounded-md border bg-card px-1.5 text-sm",
+                                !horario.fecha_fin && "border-destructive"
+                              )}
+                              aria-label="Fecha de salida"
+                            />
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1.5" title="Registrados">
                       <Users className="h-4 w-4 text-success" />
@@ -1682,6 +1821,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   const etapa = etapaLista(list);
                   const centroLista = centros.find((c) => c.id === list.centro_id) ?? null;
                   const destino = nombreDestino(list.centro_id, list.lugar_id);
+                  const checkoutPasado = !!list.checkout_at && new Date(list.checkout_at) <= new Date();
                   const bungalowsDeLista = bungalowsDe(
                     list.lugar_id,
                     (list.scanned_records || []).map((r: Record) => r.bungalow_id)
@@ -1704,12 +1844,23 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                         <div className="min-w-0 flex-1">
                           <p className="flex items-center gap-2">
                             <span className="font-sign truncate text-lg font-bold">{list.title}</span>
-                            {etapa === "estadia" && (
-                              <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-semibold text-success">
-                                En estadía
-                              </span>
-                            )}
+                            {etapa === "estadia" &&
+                              (checkoutPasado ? (
+                                <span className="shrink-0 rounded-full bg-warning/20 px-2 py-0.5 text-xs font-semibold">
+                                  Check-out pasado
+                                </span>
+                              ) : (
+                                <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-semibold text-success">
+                                  En estadía
+                                </span>
+                              ))}
                           </p>
+                          {list.modalidad && (
+                            <p className="truncate text-sm text-muted-foreground">
+                              <CalendarDays className="-mt-0.5 mr-1 inline h-3.5 w-3.5" />
+                              {textoHorario(list)}
+                            </p>
+                          )}
                           <p className="truncate text-sm text-muted-foreground">
                             {destino && (
                               <>
@@ -1748,7 +1899,9 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                           {etapa === "estadia" && (
                             <div className="flex flex-wrap items-center justify-between gap-2 border-b px-1 py-3">
                               <p className="text-sm text-muted-foreground">
-                                Las salidas y regresos se registran en la pestaña Puerta.
+                                {checkoutPasado
+                                  ? "Ya pasó el check-out: quien sale no puede volver a entrar. Termina la estadía cuando todos se hayan ido."
+                                  : "Las salidas y regresos se registran en la pestaña Puerta."}
                               </p>
                               <Button
                                 variant="outline"

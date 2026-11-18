@@ -386,11 +386,16 @@ export type Database = {
       scan_lists: {
         Row: {
           centro_id: string | null
+          checkin_at: string | null
+          checkout_at: string | null
           closed_at: string | null
           created_at: string
           estadia_fin_at: string | null
+          fecha_fin: string | null
+          fecha_inicio: string | null
           id: string
           lugar_id: string | null
+          modalidad: string | null
           padron: Json | null
           padron_archivo: string | null
           title: string
@@ -398,11 +403,16 @@ export type Database = {
         }
         Insert: {
           centro_id?: string | null
+          checkin_at?: string | null
+          checkout_at?: string | null
           closed_at?: string | null
           created_at?: string
           estadia_fin_at?: string | null
+          fecha_fin?: string | null
+          fecha_inicio?: string | null
           id?: string
           lugar_id?: string | null
+          modalidad?: string | null
           padron?: Json | null
           padron_archivo?: string | null
           title: string
@@ -410,11 +420,16 @@ export type Database = {
         }
         Update: {
           centro_id?: string | null
+          checkin_at?: string | null
+          checkout_at?: string | null
           closed_at?: string | null
           created_at?: string
           estadia_fin_at?: string | null
+          fecha_fin?: string | null
+          fecha_inicio?: string | null
           id?: string
           lugar_id?: string | null
+          modalidad?: string | null
           padron?: Json | null
           padron_archivo?: string | null
           title?: string

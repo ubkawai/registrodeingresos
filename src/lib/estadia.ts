@@ -44,8 +44,11 @@ export type ListaPuerta = {
   lugar: string | null;
   created_at: string;
   en_llegada: boolean;
-  total: number;
+  checkout_at: string | null;
+  total: number; // en estadía, sin los que ya se retiraron
   fuera: number;
+  retirados: number; // salieron y ya pasó el check-out
+  por_salir: number; // siguen dentro aunque ya pasó el check-out
 };
 
 export type PersonaFuera = {
@@ -71,6 +74,53 @@ export type EstadoPuerta = {
   listas: ListaPuerta[];
   bungalows: OcupacionBungalow[];
   fuera: PersonaFuera[];
+};
+
+// ================== Horario de la lista ==================
+// Estadía: check-in 17:00 del primer día, check-out 15:00 del último.
+// Full day: 09:00 a 17:00 del mismo día.
+export type Modalidad = "estadia" | "full_day";
+
+export const HORARIO: { [m in Modalidad]: { checkin: string; checkout: string; nombre: string } } = {
+  estadia: { checkin: "17:00", checkout: "15:00", nombre: "Estadía" },
+  full_day: { checkin: "09:00", checkout: "17:00", nombre: "Full day" },
+};
+
+export type Horario = {
+  modalidad: Modalidad | null;
+  fecha_inicio: string | null; // "2026-11-18"
+  fecha_fin: string | null;
+};
+
+// Instante local (hora de Perú del equipo) de una fecha "yyyy-mm-dd" a una hora "HH:mm"
+const instante = (fecha: string, hora: string) => {
+  const [y, m, d] = fecha.split("-").map(Number);
+  const [h, min] = hora.split(":").map(Number);
+  return new Date(y, m - 1, d, h, min).toISOString();
+};
+
+// Check-in y check-out programados según la modalidad y las fechas
+export const calcularHorario = (h: Horario) => {
+  if (!h.modalidad || !h.fecha_inicio) return { checkin_at: null, checkout_at: null };
+  const fin = h.modalidad === "full_day" ? h.fecha_inicio : h.fecha_fin;
+  const hr = HORARIO[h.modalidad];
+  return {
+    checkin_at: instante(h.fecha_inicio, hr.checkin),
+    checkout_at: fin ? instante(fin, hr.checkout) : null,
+  };
+};
+
+// "Estadía · 18/11 17:00 → 20/11 15:00"
+export const textoHorario = (l: {
+  modalidad?: string | null;
+  checkin_at?: string | null;
+  checkout_at?: string | null;
+}) => {
+  if (!l.modalidad) return "";
+  const nombre = HORARIO[l.modalidad as Modalidad]?.nombre ?? "";
+  const f = (iso: string) => format(new Date(iso), "dd/MM HH:mm");
+  if (!l.checkin_at) return nombre;
+  return `${nombre} · ${f(l.checkin_at)} → ${l.checkout_at ? f(l.checkout_at) : "¿salida?"}`;
 };
 
 // Etapa de una lista según sus fechas

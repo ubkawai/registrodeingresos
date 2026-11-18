@@ -13,6 +13,8 @@ import {
 import { toast } from "sonner";
 import {
   AlarmClock,
+  Ban,
+  Flag,
   ArrowLeftFromLine,
   ArrowRight,
   ArrowRightToLine,
@@ -53,8 +55,20 @@ type Lectura =
       salidaAt?: string | null;
       salidaMotivo?: string | null;
       tarde?: boolean;
+      // Salida después del check-out: ya no vuelve
+      final?: boolean;
     }
   | { estado: "repetido"; dni: string; nombre: string; lista: string; tipo: string }
+  | {
+      estado: "terminada";
+      dni: string;
+      nombre: string;
+      lista: string;
+      lugar?: string | null;
+      bungalow?: string | null;
+      checkoutAt: string;
+      salidaAt: string;
+    }
   | { estado: "no_pertenece"; dni: string; nombre?: string; otroCentro?: string; lista?: string }
   | { estado: "error"; dni: string; mensaje: string };
 
@@ -267,9 +281,22 @@ export const Puerta = ({
           at: r.created_at,
           salidaAt: r.salida_at,
           salidaMotivo: r.salida_motivo,
+          final: !!r.final,
           tarde,
         });
         cargar();
+      } else if (r.motivo === "estadia_terminada") {
+        sonido.error();
+        mostrar({
+          estado: "terminada",
+          dni,
+          nombre: r.nombre,
+          lista: r.lista,
+          lugar: r.lugar,
+          bungalow: r.bungalow,
+          checkoutAt: r.checkout_at,
+          salidaAt: r.salida_at,
+        });
       } else if (r.motivo === "repetido") {
         mostrar({ estado: "repetido", dni, nombre: r.nombre, lista: r.lista, tipo: r.tipo });
       } else if (r.motivo === "no_pertenece") {
@@ -625,6 +652,13 @@ export const Puerta = ({
                     <span className="text-sm tabular-nums text-muted-foreground">
                       {l.total - l.fuera} dentro
                       {l.fuera > 0 && <span className="text-warning"> · {l.fuera} fuera</span>}
+                      {l.retirados > 0 && <span> · {l.retirados} se fueron</span>}
+                      {l.por_salir > 0 && (
+                        <span className="font-semibold text-destructive">
+                          {" "}
+                          · {l.por_salir} debían salir {format(new Date(l.checkout_at!), "HH:mm")}
+                        </span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -707,9 +741,11 @@ const Letrero = ({
 
   switch (lectura.estado) {
     case "salida":
-      cls = "bg-warning text-foreground";
-      Icon = ArrowLeftFromLine;
-      titulo = `Salió · ${format(new Date(lectura.at), "HH:mm")}`;
+      cls = lectura.final ? "bg-primary text-primary-foreground" : "bg-warning text-foreground";
+      Icon = lectura.final ? Flag : ArrowLeftFromLine;
+      titulo = lectura.final
+        ? `Salida final · ${format(new Date(lectura.at), "HH:mm")} · estadía terminada`
+        : `Salió · ${format(new Date(lectura.at), "HH:mm")}`;
       nombre = lectura.nombre;
       detalle = [lectura.bungalow || lectura.lugar, lectura.lista].filter(Boolean).join(" · ");
       break;
@@ -730,6 +766,18 @@ const Letrero = ({
           )}
         </>
       );
+      break;
+    case "terminada":
+      cls = "bg-destructive text-white";
+      Icon = Ban;
+      titulo = `Estadía terminada · check-out ${format(new Date(lectura.checkoutAt), "dd/MM HH:mm")}`;
+      nombre = lectura.nombre;
+      detalle = `No puede volver a entrar. Salió el ${format(new Date(lectura.salidaAt), "dd/MM HH:mm")} · ${[
+        lectura.bungalow || lectura.lugar,
+        lectura.lista,
+      ]
+        .filter(Boolean)
+        .join(" · ")}`;
       break;
     case "repetido":
       cls = "border-2 border-input bg-card text-foreground";
