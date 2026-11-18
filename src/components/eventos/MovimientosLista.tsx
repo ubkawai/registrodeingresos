@@ -60,9 +60,11 @@ export const MovimientosLista = ({
     );
   }
 
-  const sinRegresar = salidas.filter((s) => !s.reingreso).length;
+  const sinRegresar = salidas.filter((s) => !s.reingreso && !s.salida.definitiva).length;
+  const retirados = salidas.filter((s) => s.salida.definitiva).length;
   const tarde = (s: (typeof salidas)[number]) =>
     !!hora &&
+    !s.salida.definitiva &&
     (s.reingreso
       ? new Date(s.reingreso.created_at) > vencimiento(s.salida.created_at, hora)
       : estaVencido(s.salida.created_at, hora));
@@ -76,7 +78,8 @@ export const MovimientosLista = ({
             {salidas.length === 0
               ? "ninguna"
               : `${salidas.length} ${salidas.length === 1 ? "salida" : "salidas"}` +
-                (sinRegresar ? ` · ${sinRegresar} sin regresar` : "")}
+                (sinRegresar ? ` · ${sinRegresar} sin regresar` : "") +
+                (retirados ? ` · ${retirados} se retiraron` : "")}
           </span>
         </p>
         {salidas.length > 0 && (
@@ -127,6 +130,8 @@ export const MovimientosLista = ({
                     {format(new Date(s.salida.created_at), "dd/MM HH:mm")} →{" "}
                     {s.reingreso ? (
                       format(new Date(s.reingreso.created_at), "HH:mm")
+                    ) : s.salida.definitiva ? (
+                      <span className="font-semibold text-foreground">se retiró</span>
                     ) : (
                       <span className="font-semibold text-destructive">no regresó</span>
                     )}

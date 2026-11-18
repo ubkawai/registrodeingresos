@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   AlarmClock,
+  UserX,
   Ban,
   Flag,
   ArrowLeftFromLine,
@@ -66,7 +67,8 @@ type Lectura =
       lista: string;
       lugar?: string | null;
       bungalow?: string | null;
-      checkoutAt: string;
+      checkoutAt: string | null;
+      por: "retiro" | "checkout";
       salidaAt: string;
     }
   | { estado: "no_pertenece"; dni: string; nombre?: string; otroCentro?: string; lista?: string }
@@ -295,6 +297,7 @@ export const Puerta = ({
           lugar: r.lugar,
           bungalow: r.bungalow,
           checkoutAt: r.checkout_at,
+          por: r.por === "retiro" ? "retiro" : "checkout",
           salidaAt: r.salida_at,
         });
       } else if (r.motivo === "repetido") {
@@ -356,6 +359,22 @@ export const Puerta = ({
     setMotivo(t);
     cargar();
     focusScan();
+  };
+
+  // Se retira antes que su grupo: la salida queda como definitiva
+  const [retiroGuardado, setRetiroGuardado] = useState(false);
+  useEffect(() => setRetiroGuardado(false), [seq]);
+
+  const marcarRetiro = async (movId: string, nombre: string, definitiva: boolean) => {
+    const { error } = await supabase.from("movimientos").update({ definitiva }).eq("id", movId);
+    if (error) {
+      toast.error("No se pudo guardar: " + error.message);
+      return false;
+    }
+    toast(definitiva ? `${nombre} se retiró: ya no cuenta como fuera` : `${nombre} vuelve a contar como fuera`);
+    cargar();
+    focusScan();
+    return true;
   };
 
   // ================== Pantalla ==================
@@ -489,6 +508,44 @@ export const Puerta = ({
                 {motivoGuardado && (
                   <p className="mt-2 text-sm text-success">Motivo guardado: {motivoGuardado}</p>
                 )}
+
+                {!lectura.final && (
+                  <div className="mt-3 border-t pt-3">
+                    {retiroGuardado ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="flex items-center gap-1.5 text-sm font-semibold">
+                          <UserX className="h-4 w-4" />
+                          Se retira: no regresa
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8"
+                          onClick={async () => {
+                            if (await marcarRetiro(lectura.id, lectura.nombre, false)) setRetiroGuardado(false);
+                          }}
+                        >
+                          Deshacer
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start"
+                        onClick={async () => {
+                          if (await marcarRetiro(lectura.id, lectura.nombre, true)) setRetiroGuardado(true);
+                        }}
+                      >
+                        <UserX className="mr-2 h-4 w-4" />
+                        Se retira (no regresa)
+                      </Button>
+                    )}
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Úsalo si se va antes que su grupo. No contará como fuera ni sonará la alarma de
+                      la hora límite, y no podrá volver a entrar.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -602,6 +659,18 @@ export const Puerta = ({
                       </p>
                       <p className="text-muted-foreground">salió {format(new Date(p.salida_at), "HH:mm")}</p>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground"
+                      title="Se retiró (no regresa)"
+                      aria-label={`${p.nombre} se retiró (no regresa)`}
+                      onClick={() => {
+                        if (window.confirm(`¿${p.nombre} se retiró y ya no regresa?`)) marcarRetiro(p.id, p.nombre, true);
+                      }}
+                    >
+                      <UserX className="h-4 w-4" />
+                    </Button>
                   </li>
                 ))}
               </ol>
@@ -770,9 +839,12 @@ const Letrero = ({
     case "terminada":
       cls = "bg-destructive text-white";
       Icon = Ban;
-      titulo = `Estadía terminada · check-out ${format(new Date(lectura.checkoutAt), "dd/MM HH:mm")}`;
+      titulo =
+        lectura.por === "retiro" || !lectura.checkoutAt
+          ? "Se retiró · no puede volver a entrar"
+          : `Estadía terminada · check-out ${format(new Date(lectura.checkoutAt), "dd/MM HH:mm")}`;
       nombre = lectura.nombre;
-      detalle = `No puede volver a entrar. Salió el ${format(new Date(lectura.salidaAt), "dd/MM HH:mm")} · ${[
+      detalle = `${lectura.por === "retiro" ? "Salida definitiva" : "No puede volver a entrar"}. Salió el ${format(new Date(lectura.salidaAt), "dd/MM HH:mm")} · ${[
         lectura.bungalow || lectura.lugar,
         lectura.lista,
       ]

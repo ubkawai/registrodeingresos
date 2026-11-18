@@ -36,6 +36,8 @@ export type Movimiento = {
   tipo: "salida" | "reingreso";
   motivo: string | null;
   created_at: string;
+  // Se retiró antes que su grupo: no regresa
+  definitiva?: boolean;
 };
 
 export type ListaPuerta = {
@@ -251,7 +253,7 @@ export const filasMovimientos = (
     ["DNI", "Nombre", "Bungalow", "Salida", "Motivo", "Reingreso", "Tiempo fuera", "Fuera de hora"],
   ];
   for (const s of salidasConReingreso(movs)) {
-    const tarde = horaLimite
+    const tarde = horaLimite && !s.salida.definitiva
       ? s.reingreso
         ? new Date(s.reingreso.created_at) > vencimiento(s.salida.created_at, horaLimite)
         : estaVencido(s.salida.created_at, horaLimite)
@@ -262,7 +264,7 @@ export const filasMovimientos = (
       bungalowDe.get(s.salida.dni_number) ?? "",
       fh(s.salida.created_at),
       s.salida.motivo ?? "",
-      s.reingreso ? fh(s.reingreso.created_at) : "NO REGRESÓ",
+      s.reingreso ? fh(s.reingreso.created_at) : s.salida.definitiva ? "SE RETIRÓ" : "NO REGRESÓ",
       s.reingreso ? duracion(s.salida.created_at, s.reingreso.created_at) : "",
       tarde ? "SÍ" : "",
     ]);

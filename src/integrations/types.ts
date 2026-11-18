@@ -282,6 +282,7 @@ export type Database = {
       movimientos: {
         Row: {
           created_at: string
+          definitiva: boolean
           dni_number: string
           full_name: string
           id: string
@@ -292,6 +293,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          definitiva?: boolean
           dni_number: string
           full_name: string
           id?: string
@@ -302,6 +304,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          definitiva?: boolean
           dni_number?: string
           full_name?: string
           id?: string
