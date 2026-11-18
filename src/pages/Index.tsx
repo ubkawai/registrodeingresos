@@ -6,11 +6,13 @@ import Eventos from "@/pages/Eventos";
 import Asistencia from "@/pages/Asistencia";
 import { Clock, Loader2, LogOut, Tent } from "lucide-react";
 
-// Después de iniciar sesión se elige el módulo según el rol:
+// Después de iniciar sesión se elige el módulo según los roles (puede tener varios):
 //   usuario -> Eventos (ingreso de invitados y acampantes)
 //   rrhh    -> Asistencia del personal
 //   kiosko  -> Asistencia, solo la pantalla de marcado
-//   admin   -> elige (se recuerda en este equipo)
+//   admin   -> todo
+// Con acceso a los dos módulos (admin, o por ejemplo usuario + kiosko) se elige
+// y se recuerda en este equipo.
 type Modulo = "eventos" | "asistencia";
 
 // Se recuerda por usuario: otro admin en el mismo equipo ve el selector
@@ -39,7 +41,7 @@ const Index = () => {
   const [session, setSession] = useState<any>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const userId: string | undefined = session?.user?.id;
-  const [role, setRole] = useState<string | null>(null);
+  const [roles, setRoles] = useState<string[] | null>(null);
   const [modulo, setModulo] = useState<Modulo | null>(null);
 
   useEffect(() => {
@@ -61,19 +63,19 @@ const Index = () => {
 
   useEffect(() => {
     if (!userId) {
-      setRole(null);
+      setRoles(null);
       setDebeCambiarPassword(false);
       return;
     }
     supabase
       .from("profiles")
-      .select("role, must_change_password")
+      .select("role, roles, must_change_password")
       .eq("id", userId)
       .maybeSingle()
       .then(({ data, error }) => {
         if (error) console.error(error);
         setDebeCambiarPassword(!!data?.must_change_password);
-        setRole(data?.role ?? "usuario");
+        setRoles(data?.roles?.length ? data.roles : [data?.role ?? "usuario"]);
       });
   }, [userId]);
 
@@ -84,7 +86,7 @@ const Index = () => {
 
   if (!sessionLoaded) return <Cargando />;
   if (!session) return <Auth />;
-  if (!role) return <Cargando />;
+  if (!roles) return <Cargando />;
   if (debeCambiarPassword) {
     return (
       <CambiarPassword
@@ -94,15 +96,26 @@ const Index = () => {
     );
   }
 
-  if (role === "usuario") return <Eventos session={session} role={role} />;
-  if (role === "rrhh" || role === "kiosko") return <Asistencia session={session} role={role} />;
+  const esAdmin = roles.includes("admin");
+  const puedeEventos = esAdmin || roles.includes("usuario");
+  const puedeAsistencia = esAdmin || roles.includes("rrhh") || roles.includes("kiosko");
+  // Rol con el que entra a cada módulo
+  const rolEventos = esAdmin ? "admin" : "usuario";
+  const rolAsistencia = esAdmin ? "admin" : roles.includes("rrhh") ? "rrhh" : "kiosko";
 
-  // Administrador
+  if (!puedeAsistencia) return <Eventos session={session} role={rolEventos} />;
+  if (!puedeEventos) return <Asistencia session={session} role={rolAsistencia} />;
+
+  // Acceso a los dos módulos
   if (modulo === "eventos") {
-    return <Eventos session={session} role={role} onCambiarModulo={() => elegir("asistencia")} />;
+    return (
+      <Eventos session={session} role={rolEventos} onCambiarModulo={() => elegir("asistencia")} />
+    );
   }
   if (modulo === "asistencia") {
-    return <Asistencia session={session} role={role} onCambiarModulo={() => elegir("eventos")} />;
+    return (
+      <Asistencia session={session} role={rolAsistencia} onCambiarModulo={() => elegir("eventos")} />
+    );
   }
   return <SelectorModulo email={session.user?.email ?? ""} onElegir={elegir} />;
 };

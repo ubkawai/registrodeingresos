@@ -330,6 +330,7 @@ export type Database = {
           id: string
           must_change_password: boolean
           role: string
+          roles: string[]
         }
         Insert: {
           created_at?: string
@@ -337,6 +338,7 @@ export type Database = {
           id: string
           must_change_password?: boolean
           role?: string
+          roles?: string[]
         }
         Update: {
           created_at?: string
@@ -344,6 +346,7 @@ export type Database = {
           id?: string
           must_change_password?: boolean
           role?: string
+          roles?: string[]
         }
         Relationships: []
       }
@@ -597,6 +600,7 @@ export type Database = {
         Returns: Json
       }
       mi_rol: { Args: Record<PropertyKey, never>; Returns: string }
+      tiene_rol: { Args: { p_roles: string[] }; Returns: boolean }
       registrar_movimiento: {
         Args: { p_centro_id: string; p_dni: string; p_motivo?: string }
         Returns: Json

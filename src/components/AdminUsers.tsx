@@ -5,13 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +38,7 @@ import {
   KeyRound,
   ShieldCheck,
   User,
+  UserCog,
   Ban,
   CheckCircle2,
   Trash2,
@@ -56,11 +51,55 @@ import { cn } from "@/lib/utils";
 type Role = "admin" | "usuario" | "rrhh" | "kiosko";
 
 const ROLES: { value: Role; label: string; desc: string }[] = [
-  { value: "usuario", label: "Usuario", desc: "Eventos: registra y ve sus listas" },
+  { value: "usuario", label: "Eventos", desc: "Ingreso de acampantes, puerta y listas" },
+  { value: "kiosko", label: "Kiosko de asistencia", desc: "Marca la asistencia de los trabajadores" },
   { value: "rrhh", label: "RR.HH.", desc: "Asistencia: trabajadores, reportes y correcciones" },
-  { value: "kiosko", label: "Kiosko de asistencia", desc: "Equipo de la puerta: solo marca" },
   { value: "admin", label: "Administrador", desc: "Todo, además gestiona cuentas" },
 ];
+
+// Ordena los roles como en ROLES
+const ordenar = (roles: Role[]) => ROLES.map((r) => r.value).filter((v) => roles.includes(v));
+
+// Casillas para elegir uno o varios roles
+const RolesPicker = ({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: Role[];
+  onChange: (roles: Role[]) => void;
+  idPrefix: string;
+}) => (
+  <div className="grid gap-2">
+    {ROLES.map((r) => {
+      const id = `${idPrefix}-${r.value}`;
+      const marcado = value.includes(r.value);
+      return (
+        <label
+          key={r.value}
+          htmlFor={id}
+          className={cn(
+            "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors",
+            marcado ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+          )}
+        >
+          <Checkbox
+            id={id}
+            checked={marcado}
+            onCheckedChange={(v) =>
+              onChange(v ? ordenar([...value, r.value]) : value.filter((x) => x !== r.value))
+            }
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-sm font-medium">{r.label}</span>
+            <span className="block text-xs text-muted-foreground">{r.desc}</span>
+          </span>
+        </label>
+      );
+    })}
+  </div>
+);
 
 const roleLabel = (r: Role) => ROLES.find((x) => x.value === r)?.label ?? r;
 
@@ -68,6 +107,7 @@ interface AppUser {
   id: string;
   email: string;
   role: Role;
+  roles: Role[];
   created_at: string;
   last_sign_in_at: string | null;
   active: boolean;
@@ -95,7 +135,9 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("usuario");
+  const [roles, setRoles] = useState<Role[]>(["usuario"]);
+  const [rolesUser, setRolesUser] = useState<AppUser | null>(null);
+  const [rolesEdit, setRolesEdit] = useState<Role[]>([]);
   const [creating, setCreating] = useState(false);
 
   const [pwdUser, setPwdUser] = useState<AppUser | null>(null);
@@ -107,7 +149,15 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
     setLoadingList(true);
     try {
       const data = await callAdmin({ action: "list" });
-      setUsers(data.users ?? []);
+      // Los roles se leen de profiles (la Edge Function solo trae el principal)
+      const { data: perfiles } = await supabase.from("profiles").select("id, roles");
+      const rolesDe = new Map((perfiles ?? []).map((p) => [p.id, p.roles as Role[]]));
+      setUsers(
+        (data.users ?? []).map((u: AppUser) => ({
+          ...u,
+          roles: rolesDe.get(u.id)?.length ? ordenar(rolesDe.get(u.id)!) : [u.role],
+        }))
+      );
     } catch (e: any) {
       toast.error("No se pudieron cargar las cuentas: " + e.message);
     } finally {
@@ -136,19 +186,49 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (roles.length === 0) {
+      toast.error("Elige al menos un rol");
+      return;
+    }
     setCreating(true);
     try {
-      await callAdmin({ action: "create", email, password, role });
+      await callAdmin({ action: "create", email, password, role: roles[0] });
+      if (roles.length > 1) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ roles })
+          .eq("email", email.trim().toLowerCase());
+        if (error) toast.error("La cuenta se creó, pero no se guardaron todos los roles: " + error.message);
+      }
       toast.success(`Cuenta creada: ${email}`);
       setEmail("");
       setPassword("");
-      setRole("usuario");
+      setRoles(["usuario"]);
       await loadUsers();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
       setCreating(false);
     }
+  };
+
+  const guardarRoles = async () => {
+    const u = rolesUser;
+    if (!u) return;
+    if (rolesEdit.length === 0) {
+      toast.error("Elige al menos un rol");
+      return;
+    }
+    setBusyId(u.id);
+    const { error } = await supabase.from("profiles").update({ roles: rolesEdit }).eq("id", u.id);
+    setBusyId(null);
+    if (error) {
+      toast.error("No se pudieron guardar los roles: " + error.message);
+      return;
+    }
+    toast.success(`Roles de ${u.email}: ${rolesEdit.map(roleLabel).join(" + ")}`);
+    setRolesUser(null);
+    await loadUsers();
   };
 
   const handleSetPassword = async (e: React.FormEvent) => {
@@ -210,22 +290,11 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                 Se le pedirá cambiarla la primera vez que inicie sesión.
               </p>
             </div>
-            <div className="space-y-1.5">
-              <Label>Rol</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r.value} value={r.value}>
-                      {r.label}: {r.desc}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Roles (puede tener varios)</Label>
+              <RolesPicker value={roles} onChange={setRoles} idPrefix="nuevo" />
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end sm:col-span-2">
               <Button type="submit" className="w-full" disabled={creating}>
                 {creating ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -298,15 +367,18 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                         )}
                       </p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "px-1.5 py-0 text-[11px]",
-                            u.role === "admin" && "border-primary/30 bg-primary/10 text-primary"
-                          )}
-                        >
-                          {roleLabel(u.role)}
-                        </Badge>
+                        {u.roles.map((r) => (
+                          <Badge
+                            key={r}
+                            variant="outline"
+                            className={cn(
+                              "px-1.5 py-0 text-[11px]",
+                              r === "admin" && "border-primary/30 bg-primary/10 text-primary"
+                            )}
+                          >
+                            {roleLabel(r)}
+                          </Badge>
+                        ))}
                         {!u.active && (
                           <Badge
                             variant="outline"
@@ -339,25 +411,15 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
                           </DropdownMenuItem>
                           {!isSelf && (
                             <>
-                              {ROLES.filter((r) => r.value !== u.role).map((r) => (
-                                <DropdownMenuItem
-                                  key={r.value}
-                                  onSelect={() =>
-                                    run(
-                                      u.id,
-                                      { action: "set_role", id: u.id, role: r.value },
-                                      `${u.email} ahora es ${r.label}`
-                                    )
-                                  }
-                                >
-                                  {r.value === "admin" ? (
-                                    <ShieldCheck className="mr-2 h-4 w-4" />
-                                  ) : (
-                                    <User className="mr-2 h-4 w-4" />
-                                  )}
-                                  Cambiar a {r.label}
-                                </DropdownMenuItem>
-                              ))}
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setRolesEdit(u.roles);
+                                  setRolesUser(u);
+                                }}
+                              >
+                                <UserCog className="mr-2 h-4 w-4" />
+                                Cambiar roles…
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onSelect={() =>
@@ -395,6 +457,26 @@ export const AdminUsers = ({ currentUserId }: { currentUserId: string }) => {
           )}
         </CardContent>
       </Card>
+
+      {/* ================== Cambiar roles ================== */}
+      <Dialog open={!!rolesUser} onOpenChange={(o) => !o && setRolesUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cambiar roles</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {rolesUser?.email}. Con acceso a Eventos y a Asistencia, al entrar elige el módulo y
+            puede cambiarlo desde el menú de su cuenta.
+          </p>
+          <RolesPicker value={rolesEdit} onChange={setRolesEdit} idPrefix="editar" />
+          <DialogFooter>
+            <Button onClick={guardarRoles} disabled={busyId === rolesUser?.id || rolesEdit.length === 0}>
+              {busyId === rolesUser?.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ================== Cambiar contraseña ================== */}
       <Dialog
