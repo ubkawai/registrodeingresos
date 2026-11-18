@@ -9,6 +9,7 @@ interface Record {
   full_name: string;
   scanned_at: string;
   fuente?: "bd" | "api";
+  bungalow_id?: string | null;
 }
 
 interface RecordsListProps {
@@ -20,6 +21,9 @@ interface RecordsListProps {
   emptyText?: string;
   // DNIs de la lista de invitados: check verde si está, X roja si no
   padron?: Set<string> | null;
+  // Bungalows del lugar de la lista: se muestra y se puede cambiar el de cada uno
+  bungalows?: { id: string; nombre: string }[];
+  onBungalowChange?: (recordId: string, bungalowId: string | null) => void;
 }
 
 export const RecordsList = ({
@@ -28,6 +32,8 @@ export const RecordsList = ({
   highlightId,
   onRemove,
   padron,
+  bungalows,
+  onBungalowChange,
   emptyText = "Escanea un DNI y la persona aparecerá aquí con la hora de llegada.",
 }: RecordsListProps) => {
   if (records.length === 0) {
@@ -94,6 +100,32 @@ export const RecordsList = ({
                 )}
               </p>
             </div>
+
+            {bungalows && bungalows.length > 0 && (
+              onBungalowChange ? (
+                <select
+                  value={r.bungalow_id ?? ""}
+                  onChange={(e) => onBungalowChange(r.id, e.target.value || null)}
+                  className={cn(
+                    "h-8 max-w-[9.5rem] shrink-0 truncate rounded-md border bg-card px-1.5 text-xs",
+                    !r.bungalow_id && "border-dashed text-muted-foreground"
+                  )}
+                  aria-label={`Bungalow de ${r.full_name}`}
+                  title="Bungalow"
+                >
+                  <option value="">Sin bungalow</option>
+                  {bungalows.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.nombre}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="max-w-[9.5rem] shrink-0 truncate text-xs text-muted-foreground">
+                  {bungalows.find((b) => b.id === r.bungalow_id)?.nombre ?? "Sin bungalow"}
+                </span>
+              )
+            )}
 
             <time
               className="shrink-0 text-sm tabular-nums text-muted-foreground"

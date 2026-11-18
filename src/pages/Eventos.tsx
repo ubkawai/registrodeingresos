@@ -36,7 +36,13 @@ import { AdminUsers } from "@/components/AdminUsers";
 import { Puerta } from "@/components/eventos/Puerta";
 import { CentrosDialog } from "@/components/eventos/CentrosDialog";
 import { MovimientosLista } from "@/components/eventos/MovimientosLista";
-import { cargarCentrosYLugares, etapaLista, type Centro, type Lugar } from "@/lib/estadia";
+import {
+  cargarCentrosYLugares,
+  etapaLista,
+  type Bungalow,
+  type Centro,
+  type Lugar,
+} from "@/lib/estadia";
 import { toast } from "sonner";
 import {
   ScanBarcode,
@@ -62,6 +68,7 @@ import {
   MapPin,
   Settings2,
   Flag,
+  BedDouble,
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -78,6 +85,7 @@ interface Record {
   full_name: string;
   scanned_at: string;
   fuente?: Fuente;
+  bungalow_id?: string | null;
 }
 
 type OpenList = { id: string; title: string; centro_id: string | null; lugar_id: string | null };
@@ -108,6 +116,7 @@ const toRecord = (r: any): Record => ({
   full_name: r.full_name,
   scanned_at: r.scanned_at,
   fuente: r.fuente === "bd" || r.fuente === "api" ? r.fuente : undefined,
+  bungalow_id: r.bungalow_id ?? null,
 });
 
 const toPadron = (row: any): Padron | null =>
@@ -149,6 +158,18 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   // ====== Centros y lugares (a dónde va cada lista) ======
   const [centros, setCentros] = useState<Centro[]>([]);
   const [lugares, setLugares] = useState<Lugar[]>([]);
+  const [bungalows, setBungalows] = useState<Bungalow[]>([]);
+  // Bungalows activos de un lugar (y el asignado aunque esté inactivo)
+  const bungalowsDe = (lId: string | null | undefined, incluir?: (string | null | undefined)[]) =>
+    lId
+      ? bungalows.filter(
+          (b) => b.lugar_id === lId && (b.activo || (incluir ?? []).includes(b.id))
+        )
+      : [];
+  // Bungalow al que va cada DNI que se escanea (el grupo llega por bungalow)
+  const [bungalowActual, setBungalowActual] = useState<string | null>(null);
+  const bungalowActualRef = useRef<string | null>(null);
+  bungalowActualRef.current = bungalowActual;
   const centrosActivos = useMemo(() => centros.filter((c) => c.activo), [centros]);
   const lugaresActivos = useMemo(() => lugares.filter((l) => l.activo), [lugares]);
   const lugaresDe = (cId: string | null) => lugaresActivos.filter((l) => l.centro_id === cId);
@@ -183,6 +204,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       .then((r) => {
         setCentros(r.centros);
         setLugares(r.lugares);
+        setBungalows(r.bungalows);
       })
       .catch((e) => toast.error("No se pudieron cargar los centros: " + e.message));
 
@@ -197,6 +219,43 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       .join(" · ");
 
   const destinoCompleto = !!centroId && (lugaresDe(centroId).length === 0 || !!lugarId);
+
+  // Bungalows del lugar de la lista en curso y cuántos hay en cada uno
+  const bungalowsLista = bungalowsDe(lugarId, currentRecords.map((r) => r.bungalow_id));
+  const ocupacion = useMemo(() => {
+    const m = new Map<string | null, number>();
+    for (const r of currentRecords) m.set(r.bungalow_id ?? null, (m.get(r.bungalow_id ?? null) ?? 0) + 1);
+    return m;
+  }, [currentRecords]);
+
+  useEffect(() => {
+    if (bungalowActual && !bungalows.some((b) => b.id === bungalowActual && b.lugar_id === lugarId)) {
+      setBungalowActual(null);
+    }
+  }, [lugarId, bungalows]);
+
+  // Cambia el bungalow de un acampante (lista en curso o lista en estadía)
+  const cambiarBungalow = async (recordId: string, bungalowId: string | null) => {
+    const { error } = await supabase
+      .from("scanned_records")
+      .update({ bungalow_id: bungalowId })
+      .eq("id", recordId);
+    if (error) {
+      toast.error("No se pudo cambiar el bungalow: " + error.message);
+      return;
+    }
+    setCurrentRecords((prev) =>
+      prev.map((r) => (r.id === recordId ? { ...r, bungalow_id: bungalowId } : r))
+    );
+    setSavedLists((prev) =>
+      prev.map((l) => ({
+        ...l,
+        scanned_records: (l.scanned_records || []).map((r: Record) =>
+          r.id === recordId ? { ...r, bungalow_id: bungalowId } : r
+        ),
+      }))
+    );
+  };
 
   // Lista abierta en la BD: cada lectura se guarda en ella al instante y los
   // demás equipos con la misma cuenta la reciben por Realtime.
@@ -435,6 +494,19 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       )
       .on(
         "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "scanned_records",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const rec = toRecord(payload.new);
+          setCurrentRecords((prev) => prev.map((r) => (r.id === rec.id ? { ...r, ...rec } : r)));
+        }
+      )
+      .on(
+        "postgres_changes",
         { event: "DELETE", schema: "public", table: "scanned_records" },
         (payload) => {
           const id = (payload.old as any)?.id;
@@ -577,6 +649,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           scanned_at: new Date().toISOString(),
           user_id: userId!,
           fuente,
+          bungalow_id: bungalowActualRef.current,
         })
         .select()
         .single();
@@ -1165,6 +1238,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
           onOpenChange={setLugaresOpen}
           centros={centros}
           lugares={lugares}
+          bungalows={bungalows}
           onCambio={recargarLugares}
         />
       )}
@@ -1229,6 +1303,51 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   </Button>
                 </form>
               </div>
+
+              {bungalowsLista.length > 0 && (
+                <section aria-label="Bungalow actual" className="rounded-lg border bg-card p-3">
+                  <Label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <BedDouble className="h-4 w-4" />
+                    Bungalow actual: cada DNI que escanees va aquí
+                  </Label>
+                  <Select
+                    value={bungalowActual ?? "ninguno"}
+                    onValueChange={(v) => {
+                      setBungalowActual(v === "ninguno" ? null : v);
+                      window.setTimeout(focusScan, 0);
+                    }}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "mt-1.5 h-11 border-2 text-base font-semibold",
+                        bungalowActual ? "border-primary" : "border-dashed text-muted-foreground"
+                      )}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ninguno">Sin bungalow (asignar después)</SelectItem>
+                      {bungalowsLista.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                    {bungalowsLista.map((b) => (
+                      <span key={b.id} className="rounded-full bg-muted px-2 py-0.5">
+                        {b.nombre}: <span className="font-semibold tabular-nums">{ocupacion.get(b.id) ?? 0}</span>
+                      </span>
+                    ))}
+                    {(ocupacion.get(null) ?? 0) > 0 && (
+                      <span className="rounded-full border border-dashed px-2 py-0.5 text-muted-foreground">
+                        Sin bungalow: <span className="font-semibold tabular-nums">{ocupacion.get(null)}</span>
+                      </span>
+                    )}
+                  </div>
+                </section>
+              )}
 
               <VerdictBoard
                 key={readSeq}
@@ -1492,6 +1611,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   highlightId={lastAddedId}
                   onRemove={handleRemoveRecord}
                   padron={padronSet}
+                  bungalows={bungalowsLista}
+                  onBungalowChange={cambiarBungalow}
                 />
               </div>
             </section>
@@ -1561,6 +1682,18 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                   const etapa = etapaLista(list);
                   const centroLista = centros.find((c) => c.id === list.centro_id) ?? null;
                   const destino = nombreDestino(list.centro_id, list.lugar_id);
+                  const bungalowsDeLista = bungalowsDe(
+                    list.lugar_id,
+                    (list.scanned_records || []).map((r: Record) => r.bungalow_id)
+                  );
+                  const bungalowDeLista = new Map<string, string>(
+                    (list.scanned_records || [])
+                      .map((r: Record) => [
+                        r.dni_number,
+                        bungalows.find((b) => b.id === r.bungalow_id)?.nombre,
+                      ])
+                      .filter((x: [string, string | undefined]) => !!x[1])
+                  );
                   // Tuvo estadía si no se finalizó en el mismo momento que se cerró la llegada
                   const tuvoEstadia =
                     etapa === "estadia" ||
@@ -1635,6 +1768,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                                 titulo={list.title}
                                 centro={centroLista}
                                 lugar={nombreDestino(null, list.lugar_id)}
+                                bungalowDe={bungalowDeLista}
                               />
                             </div>
                           )}
@@ -1642,6 +1776,8 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                             records={list.scanned_records || []}
                             emptyText="Esta lista no tiene registros"
                             padron={dnis}
+                            bungalows={bungalowsDeLista}
+                            onBungalowChange={etapa === "finalizada" ? undefined : cambiarBungalow}
                           />
                         </div>
                       </CollapsibleContent>

@@ -131,6 +131,38 @@ export type Database = {
           },
         ]
       }
+      bungalows: {
+        Row: {
+          activo: boolean
+          created_at: string
+          id: string
+          lugar_id: string
+          nombre: string
+        }
+        Insert: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          lugar_id: string
+          nombre: string
+        }
+        Update: {
+          activo?: boolean
+          created_at?: string
+          id?: string
+          lugar_id?: string
+          nombre?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bungalows_lugar_id_fkey"
+            columns: ["lugar_id"]
+            isOneToOne: false
+            referencedRelation: "lugares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       centros: {
         Row: {
           activo: boolean
@@ -407,6 +439,7 @@ export type Database = {
       }
       scanned_records: {
         Row: {
+          bungalow_id: string | null
           dni_number: string
           fuente: string | null
           full_name: string
@@ -416,6 +449,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bungalow_id?: string | null
           dni_number: string
           fuente?: string | null
           full_name: string
@@ -425,6 +459,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bungalow_id?: string | null
           dni_number?: string
           fuente?: string | null
           full_name?: string
@@ -434,6 +469,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "scanned_records_bungalow_id_fkey"
+            columns: ["bungalow_id"]
+            isOneToOne: false
+            referencedRelation: "bungalows"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "scanned_records_scan_list_id_fkey"
             columns: ["scan_list_id"]

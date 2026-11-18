@@ -21,11 +21,14 @@ export const MovimientosLista = ({
   titulo,
   centro,
   lugar,
+  bungalowDe,
 }: {
   listaId: string;
   titulo: string;
   centro: Centro | null;
   lugar: string;
+  // DNI → bungalow
+  bungalowDe?: Map<string, string>;
 }) => {
   const [movs, setMovs] = useState<Movimiento[] | null>(null);
 
@@ -84,7 +87,7 @@ export const MovimientosLista = ({
             onClick={() =>
               descargarCsv(
                 `salidas_${titulo.replace(/[^\w-]+/g, "_")}.csv`,
-                filasMovimientos(titulo, centro?.nombre ?? "", lugar, hora, movs)
+                filasMovimientos(titulo, centro?.nombre ?? "", lugar, hora, movs, bungalowDe)
               )
             }
           >
@@ -115,6 +118,7 @@ export const MovimientosLista = ({
                   <p className="font-narrow truncate text-sm font-semibold">{s.salida.full_name}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     <span className="dni">{s.salida.dni_number}</span>
+                    {bungalowDe?.get(s.salida.dni_number) && <> · {bungalowDe.get(s.salida.dni_number)}</>}
                     {s.salida.motivo && <> · {s.salida.motivo}</>}
                   </p>
                 </div>

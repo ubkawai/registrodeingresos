@@ -48,6 +48,7 @@ type Lectura =
       nombre: string;
       lista: string;
       lugar?: string | null;
+      bungalow?: string | null;
       at: string;
       salidaAt?: string | null;
       salidaMotivo?: string | null;
@@ -262,6 +263,7 @@ export const Puerta = ({
           nombre: r.nombre,
           lista: r.lista,
           lugar: r.lugar,
+          bungalow: r.bungalow,
           at: r.created_at,
           salidaAt: r.salida_at,
           salidaMotivo: r.salida_motivo,
@@ -560,7 +562,9 @@ export const Puerta = ({
                       </p>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">
                         <span className="dni">{p.dni}</span> ·{" "}
-                        {p.lugar && <span className="font-medium text-foreground">{p.lugar} · </span>}
+                        {(p.bungalow || p.lugar) && (
+                          <span className="font-medium text-foreground">{p.bungalow || p.lugar} · </span>
+                        )}
                         {p.lista}
                         {p.motivo && <> · {p.motivo}</>}
                       </p>
@@ -576,6 +580,30 @@ export const Puerta = ({
               </ol>
             )}
           </div>
+
+          {(estado?.bungalows ?? []).some((b) => b.bungalow) && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Por bungalow</h3>
+              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {estado!.bungalows.map((b) => (
+                  <li
+                    key={`${b.lugar}-${b.bungalow}`}
+                    className={cn(
+                      "rounded-lg border bg-card px-3 py-2",
+                      !b.bungalow && "border-dashed"
+                    )}
+                  >
+                    <p className="truncate text-sm font-medium">{b.bungalow ?? "Sin bungalow"}</p>
+                    <p className="truncate text-xs text-muted-foreground">{b.lugar ?? "Sin lugar"}</p>
+                    <p className="mt-1 text-sm tabular-nums">
+                      <span className="font-semibold">{b.total - b.fuera}</span> dentro
+                      {b.fuera > 0 && <span className="text-warning"> · {b.fuera} fuera</span>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {(estado?.listas.length ?? 0) > 0 && (
             <div>
@@ -683,7 +711,7 @@ const Letrero = ({
       Icon = ArrowLeftFromLine;
       titulo = `Salió · ${format(new Date(lectura.at), "HH:mm")}`;
       nombre = lectura.nombre;
-      detalle = [lectura.lugar, lectura.lista].filter(Boolean).join(" · ");
+      detalle = [lectura.bungalow || lectura.lugar, lectura.lista].filter(Boolean).join(" · ");
       break;
     case "reingreso":
       cls = lectura.tarde ? "bg-destructive text-white" : "bg-success text-white";
@@ -692,7 +720,7 @@ const Letrero = ({
       nombre = lectura.nombre;
       detalle = (
         <>
-          {[lectura.lugar, lectura.lista].filter(Boolean).join(" · ")}
+          {[lectura.bungalow || lectura.lugar, lectura.lista].filter(Boolean).join(" · ")}
           {lectura.salidaAt && (
             <>
               {" "}

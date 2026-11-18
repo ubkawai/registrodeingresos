@@ -20,6 +20,14 @@ export type Lugar = {
   activo: boolean;
 };
 
+// Bungalow dentro de un lugar (ej. Casona Hombres 1). Se asigna a cada acampante.
+export type Bungalow = {
+  id: string;
+  lugar_id: string;
+  nombre: string;
+  activo: boolean;
+};
+
 export type Movimiento = {
   id: string;
   scan_list_id: string;
@@ -47,11 +55,23 @@ export type PersonaFuera = {
   lista_id: string;
   lista: string;
   lugar: string | null;
+  bungalow: string | null;
   salida_at: string;
   motivo: string | null;
 };
 
-export type EstadoPuerta = { listas: ListaPuerta[]; fuera: PersonaFuera[] };
+export type OcupacionBungalow = {
+  lugar: string | null;
+  bungalow: string | null; // null = sin bungalow asignado
+  total: number;
+  fuera: number;
+};
+
+export type EstadoPuerta = {
+  listas: ListaPuerta[];
+  bungalows: OcupacionBungalow[];
+  fuera: PersonaFuera[];
+};
 
 // Etapa de una lista según sus fechas
 export type Etapa = "llegada" | "estadia" | "finalizada";
@@ -63,14 +83,24 @@ export const MOTIVOS_RAPIDOS = ["Compras", "Salud", "Permiso familiar", "Trabajo
 
 export const horaCorta = (hora: string | null | undefined) => (hora ?? "23:00").slice(0, 5);
 
-export const cargarCentrosYLugares = async (): Promise<{ centros: Centro[]; lugares: Lugar[] }> => {
-  const [c, l] = await Promise.all([
+export const cargarCentrosYLugares = async (): Promise<{
+  centros: Centro[];
+  lugares: Lugar[];
+  bungalows: Bungalow[];
+}> => {
+  const [c, l, b] = await Promise.all([
     supabase.from("centros").select("*").order("nombre"),
     supabase.from("lugares").select("*").order("nombre"),
+    supabase.from("bungalows").select("*").order("nombre"),
   ]);
   if (c.error) throw c.error;
   if (l.error) throw l.error;
-  return { centros: (c.data ?? []) as Centro[], lugares: (l.data ?? []) as Lugar[] };
+  if (b.error) throw b.error;
+  return {
+    centros: (c.data ?? []) as Centro[],
+    lugares: (l.data ?? []) as Lugar[],
+    bungalows: (b.data ?? []) as Bungalow[],
+  };
 };
 
 // Hora a la que debía regresar quien salió en `salidaIso`.
@@ -157,7 +187,9 @@ export const filasMovimientos = (
   centro: string,
   lugar: string,
   horaLimite: string | null,
-  movs: Movimiento[]
+  movs: Movimiento[],
+  // DNI → bungalow
+  bungalowDe: Map<string, string> = new Map()
 ): unknown[][] => {
   const filas: unknown[][] = [
     ["Lista", lista],
@@ -166,7 +198,7 @@ export const filasMovimientos = (
     ["Hora límite", horaLimite ? horaCorta(horaLimite) : ""],
     ["Generado", format(new Date(), "dd/MM/yyyy HH:mm")],
     [],
-    ["DNI", "Nombre", "Salida", "Motivo", "Reingreso", "Tiempo fuera", "Fuera de hora"],
+    ["DNI", "Nombre", "Bungalow", "Salida", "Motivo", "Reingreso", "Tiempo fuera", "Fuera de hora"],
   ];
   for (const s of salidasConReingreso(movs)) {
     const tarde = horaLimite
@@ -177,6 +209,7 @@ export const filasMovimientos = (
     filas.push([
       s.salida.dni_number,
       s.salida.full_name,
+      bungalowDe.get(s.salida.dni_number) ?? "",
       fh(s.salida.created_at),
       s.salida.motivo ?? "",
       s.reingreso ? fh(s.reingreso.created_at) : "NO REGRESÓ",

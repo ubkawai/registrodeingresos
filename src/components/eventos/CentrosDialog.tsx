@@ -12,8 +12,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Building2, Loader2, MapPin, Plus, Trash2 } from "lucide-react";
-import { horaCorta, type Centro, type Lugar } from "@/lib/estadia";
+import { BedDouble, Building2, Loader2, MapPin, Plus, Trash2 } from "lucide-react";
+import { horaCorta, type Bungalow, type Centro, type Lugar } from "@/lib/estadia";
+
+type Tabla = "centros" | "lugares" | "bungalows";
 
 // Solo el administrador: crea los centros (con su hora límite de regreso) y
 // los lugares o alojamientos de cada centro.
@@ -22,12 +24,14 @@ export const CentrosDialog = ({
   onOpenChange,
   centros,
   lugares,
+  bungalows,
   onCambio,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   centros: Centro[];
   lugares: Lugar[];
+  bungalows: Bungalow[];
   onCambio: () => void;
 }) => {
   const [nombre, setNombre] = useState("");
@@ -52,7 +56,7 @@ export const CentrosDialog = ({
     onCambio();
   };
 
-  const actualizar = async (tabla: "centros" | "lugares", id: string, cambios: object) => {
+  const actualizar = async (tabla: Tabla, id: string, cambios: object) => {
     const { error } = await supabase.from(tabla).update(cambios).eq("id", id);
     if (error) {
       toast.error(
@@ -133,6 +137,7 @@ export const CentrosDialog = ({
                 key={c.id}
                 centro={c}
                 lugares={lugares.filter((l) => l.centro_id === c.id)}
+                bungalows={bungalows}
                 onActualizar={actualizar}
                 onEliminarCentro={eliminarCentro}
                 onEliminarLugar={eliminarLugar}
@@ -149,6 +154,7 @@ export const CentrosDialog = ({
 const CentroCard = ({
   centro: c,
   lugares,
+  bungalows,
   onActualizar,
   onEliminarCentro,
   onEliminarLugar,
@@ -156,7 +162,8 @@ const CentroCard = ({
 }: {
   centro: Centro;
   lugares: Lugar[];
-  onActualizar: (tabla: "centros" | "lugares", id: string, cambios: object) => void;
+  bungalows: Bungalow[];
+  onActualizar: (tabla: Tabla, id: string, cambios: object) => void;
   onEliminarCentro: (c: Centro) => void;
   onEliminarLugar: (l: Lugar) => void;
   onCambio: () => void;
@@ -227,33 +234,14 @@ const CentroCard = ({
 
       <div className="divide-y">
         {lugares.map((l) => (
-          <div key={l.id} className="flex items-center gap-3 py-2 pl-9 pr-3">
-            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <input
-              defaultValue={l.nombre}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v && v !== l.nombre) onActualizar("lugares", l.id, { nombre: v });
-                else e.target.value = l.nombre;
-              }}
-              className="min-w-0 flex-1 rounded-sm bg-transparent text-sm outline-none focus:ring-2 focus:ring-ring"
-              aria-label="Nombre del lugar"
-            />
-            <Switch
-              checked={l.activo}
-              onCheckedChange={(v) => onActualizar("lugares", l.id, { activo: v })}
-              aria-label={l.activo ? "Activo" : "Inactivo"}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => onEliminarLugar(l)}
-              aria-label={`Eliminar ${l.nombre}`}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+          <LugarRow
+            key={l.id}
+            lugar={l}
+            bungalows={bungalows.filter((b) => b.lugar_id === l.id)}
+            onActualizar={onActualizar}
+            onEliminarLugar={onEliminarLugar}
+            onCambio={onCambio}
+          />
         ))}
         <form onSubmit={crearLugar} className="flex items-center gap-2 py-2 pl-9 pr-3">
           <Input
@@ -268,6 +256,138 @@ const CentroCard = ({
           </Button>
         </form>
       </div>
+    </div>
+  );
+};
+
+// Lugar con sus bungalows (opcionales): si un lugar no tiene bungalows, se
+// toma completo
+const LugarRow = ({
+  lugar: l,
+  bungalows,
+  onActualizar,
+  onEliminarLugar,
+  onCambio,
+}: {
+  lugar: Lugar;
+  bungalows: Bungalow[];
+  onActualizar: (tabla: Tabla, id: string, cambios: object) => void;
+  onEliminarLugar: (l: Lugar) => void;
+  onCambio: () => void;
+}) => {
+  const [abierto, setAbierto] = useState(false);
+  const [nuevo, setNuevo] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const crearBungalow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = nuevo.trim();
+    if (!n) return;
+    setGuardando(true);
+    const { error } = await supabase.from("bungalows").insert({ nombre: n, lugar_id: l.id });
+    setGuardando(false);
+    if (error) {
+      toast.error(
+        error.code === "23505" ? `"${n}" ya existe en ${l.nombre}` : "No se pudo crear: " + error.message
+      );
+      return;
+    }
+    setNuevo("");
+    onCambio();
+  };
+
+  const eliminarBungalow = async (b: Bungalow) => {
+    if (!window.confirm(`¿Eliminar "${b.nombre}"? Los acampantes asignados quedarán sin bungalow.`)) return;
+    const { error } = await supabase.from("bungalows").delete().eq("id", b.id);
+    if (error) toast.error("No se pudo eliminar: " + error.message);
+    onCambio();
+  };
+
+  return (
+    <div className="py-2 pl-9 pr-3">
+      <div className="flex items-center gap-3">
+        <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <input
+          defaultValue={l.nombre}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v && v !== l.nombre) onActualizar("lugares", l.id, { nombre: v });
+            else e.target.value = l.nombre;
+          }}
+          className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
+          aria-label="Nombre del lugar"
+        />
+        <button
+          type="button"
+          onClick={() => setAbierto((v) => !v)}
+          className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-expanded={abierto}
+        >
+          {bungalows.length ? `${bungalows.length} bungalows` : "+ bungalows"}
+        </button>
+        <Switch
+          checked={l.activo}
+          onCheckedChange={(v) => onActualizar("lugares", l.id, { activo: v })}
+          aria-label={l.activo ? "Activo" : "Inactivo"}
+        />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => onEliminarLugar(l)}
+          aria-label={`Eliminar ${l.nombre}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {abierto && (
+        <div className="ml-6 mt-2 space-y-1.5">
+          {bungalows.map((b) => (
+            <div key={b.id} className="flex items-center gap-2">
+              <BedDouble className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                defaultValue={b.nombre}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== b.nombre) onActualizar("bungalows", b.id, { nombre: v });
+                  else e.target.value = b.nombre;
+                }}
+                className="min-w-0 flex-1 rounded-sm bg-transparent text-sm outline-none focus:ring-2 focus:ring-ring"
+                aria-label="Nombre del bungalow"
+              />
+              <Switch
+                checked={b.activo}
+                onCheckedChange={(v) => onActualizar("bungalows", b.id, { activo: v })}
+                aria-label={b.activo ? "Activo" : "Inactivo"}
+                className="scale-90"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => eliminarBungalow(b)}
+                aria-label={`Eliminar ${b.nombre}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          <form onSubmit={crearBungalow} className="flex items-center gap-2">
+            <Input
+              placeholder={`Bungalow de ${l.nombre} (ej. ${l.nombre} Hombres 1)`}
+              value={nuevo}
+              onChange={(e) => setNuevo(e.target.value)}
+              className="h-8 text-sm"
+              autoComplete="off"
+              autoFocus
+            />
+            <Button type="submit" size="sm" variant="secondary" className="h-8" disabled={guardando || !nuevo.trim()}>
+              {guardando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            </Button>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
