@@ -2,6 +2,8 @@
 // Se sube un Excel, CSV o PDF y se extraen pares DNI + nombre. Al escanear,
 // cada DNI se marca como "en lista" (check verde) o "fuera de lista" (X roja).
 
+// dni = "" cuando el Excel solo trae el nombre: al escanear se reconoce por
+// nombre y apellidos y se le guarda el DNI leído.
 export type PersonaPadron = { dni: string; nombre: string };
 
 export type Padron = {
@@ -136,53 +138,137 @@ const NAME_HEADER = /nombre|apellido/i;
 const dedupe = (personas: PersonaPadron[]) => {
   const seen = new Map<string, PersonaPadron>();
   for (const p of personas) {
-    const prev = seen.get(p.dni);
-    if (!prev || (!prev.nombre && p.nombre)) seen.set(p.dni, p);
+    const key = p.dni || "n:" + tokens(p.nombre).join(" ");
+    const prev = seen.get(key);
+    if (!prev || (!prev.nombre && p.nombre)) seen.set(key, p);
   }
   return [...seen.values()];
 };
 
+// ---------- Validación por nombre y apellidos ----------
+// Palabras del nombre en mayúsculas, sin tildes ni conectores ("DE", "LA"...)
+const CONECTORES = new Set(["DE", "DEL", "LA", "LAS", "LOS", "Y", "VDA", "VIUDA"]);
+export const tokens = (nombre: string) =>
+  nombre
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !CONECTORES.has(t));
+
+// Un error de tipeo (una letra de más, de menos o cambiada) en palabras largas
+const parecidas = (a: string, b: string) => {
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 5 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  return (
+    a.slice(i + 1) === b.slice(i + 1) || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i)
+  );
+};
+
+// Coincidencia del nombre del Excel con el del DNI (0 = no coincide). El Excel puede
+// traer el nombre incompleto (ej. "Juan Pérez" para "JUAN CARLOS PEREZ GOMEZ"):
+// deben estar en el DNI todas las palabras del Excel (se tolera una letra mal
+// escrita en palabras largas). No se acepta que falte una: confundiría hermanos
+// como "María Elena" y "María Rosa" Quispe Mamani.
+const puntaje = (excel: string[], dni: string[]) => {
+  if (excel.length < 2) return 0;
+  const libres = [...dni];
+  let comunes = 0;
+  for (const t of excel) {
+    const k = libres.findIndex((d) => parecidas(t, d));
+    if (k >= 0) {
+      comunes++;
+      libres.splice(k, 1);
+    }
+  }
+  // Más palabras en común = coincidencia más segura (desempata entre candidatos)
+  return comunes === excel.length ? comunes : 0;
+};
+
+// Busca entre las personas del padrón sin DNI la que corresponde al nombre
+// leído del DNI. Si dos coinciden igual de bien no se elige ninguna.
+export const buscarPorNombre = (
+  personas: PersonaPadron[],
+  nombreDni: string
+): PersonaPadron | null => {
+  const dni = tokens(nombreDni);
+  if (dni.length < 2) return null;
+  let mejor: PersonaPadron | null = null;
+  let mejorPuntaje = 0;
+  let empate = false;
+  for (const p of personas) {
+    if (p.dni || !p.nombre) continue;
+    const s = puntaje(tokens(p.nombre), dni);
+    if (s > mejorPuntaje) {
+      mejor = p;
+      mejorPuntaje = s;
+      empate = false;
+    } else if (s > 0 && s === mejorPuntaje) empate = true;
+  }
+  return empate ? null : mejor;
+};
+
 // ---------- Tablas (Excel / CSV) ----------
+// Encabezado de nombre: celda corta ("Apellidos y Nombres"), no una etiqueta
+// de la cabecera como "Nombre del responsable: ..."
+const esEncabezado = (c: Cell, re: RegExp) => {
+  const t = textCell(c);
+  return re.test(t) && t.length <= 40 && !t.includes(":");
+};
+
+// Fila sin DNI: se toma si tiene al menos un nombre y un apellido
+const nombreValido = (nombre: string) =>
+  nombre.split(" ").filter((t) => /[a-záéíóúñ]{2,}/i.test(t)).length >= 2;
+
 const parseRows = (rows: Cell[][]): PersonaPadron[] => {
   const width = Math.max(0, ...rows.map((r) => r.length));
 
-  // 1) Fila de encabezados con una columna "DNI"
+  // 1) Fila de encabezados con una columna "DNI" y/o "Nombres"/"Apellidos"
   let start = 0;
   let dniCol = -1;
   let nameCols: number[] = [];
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const idx = rows[i].findIndex((c) => DNI_HEADER.test(textCell(c)));
-    if (idx >= 0) {
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const idx = rows[i].findIndex((c) => esEncabezado(c, DNI_HEADER));
+    const nombres = rows[i]
+      .map((c, j) => (j !== idx && esEncabezado(c, NAME_HEADER) ? j : -1))
+      .filter((j) => j >= 0);
+    if (idx >= 0 || nombres.length) {
       start = i + 1;
       dniCol = idx;
-      nameCols = rows[i]
-        .map((c, j) => (j !== idx && NAME_HEADER.test(textCell(c)) ? j : -1))
-        .filter((j) => j >= 0);
+      nameCols = nombres;
       break;
     }
   }
 
-  // 2) Sin encabezados: la columna con más valores que parecen DNI
+  // 2) Sin columna "DNI": la columna con más valores que parecen DNI
   if (dniCol < 0) {
     let best = 0;
     for (let j = 0; j < width; j++) {
-      const hits = rows.filter((r) => normDni(r[j])).length;
+      if (nameCols.includes(j)) continue;
+      const hits = rows.slice(start).filter((r) => normDni(r[j])).length;
       if (hits > best) {
         best = hits;
         dniCol = j;
       }
     }
-    if (dniCol < 0) return [];
+    if (dniCol < 0 && !nameCols.length) return [];
   }
 
   const personas: PersonaPadron[] = [];
   for (const row of rows.slice(start)) {
-    const dni = normDni(row[dniCol]);
-    if (!dni) continue;
+    const dni = dniCol >= 0 ? normDni(row[dniCol]) : null;
     const parts = nameCols.length
       ? nameCols.map((j) => textCell(row[j]))
       : row.map((c, j) => (j !== dniCol && /[a-záéíóúñ]/i.test(textCell(c)) ? textCell(c) : ""));
-    personas.push({ dni, nombre: cleanName(parts.filter(Boolean).join(" ")) });
+    const nombre = cleanName(parts.filter(Boolean).join(" "));
+    if (dni) personas.push({ dni, nombre });
+    // Sin DNI solo cuando hay columnas de nombre identificadas (así no se toman
+    // como personas los textos sueltos de la cabecera o del pie)
+    else if (nameCols.length && nombreValido(nombre) && !parts.some((p) => p.includes(":")))
+      personas.push({ dni: "", nombre });
   }
   return personas;
 };

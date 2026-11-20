@@ -124,7 +124,8 @@ export const Trabajadores = ({ turnos }: { turnos: Turno[] }) => {
     if (!file) return;
     setLeyendo(true);
     try {
-      const { personas } = await parsePadronFile(file);
+      // Aquí el DNI es obligatorio: se dejan fuera las filas que solo traen nombre
+      const personas = (await parsePadronFile(file)).personas.filter((p) => p.dni);
       if (!personas.length) {
         toast.error(`No se encontraron DNI en "${file.name}"`);
         return;

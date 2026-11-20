@@ -81,7 +81,7 @@ import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { extractDniFromBarcode, lookupDni } from "@/lib/dni";
-import { parsePadronFile, type Padron, type PersonaPadron } from "@/lib/padron";
+import { buscarPorNombre, parsePadronFile, type Padron, type PersonaPadron } from "@/lib/padron";
 
 type Fuente = "bd" | "api";
 
@@ -144,8 +144,15 @@ const toPadron = (row: any): Padron | null =>
 
 const padronDnis = (row: any): Set<string> | null => {
   const p = toPadron(row);
-  return p ? new Set(p.personas.map((x) => x.dni)) : null;
+  return p ? new Set(p.personas.map((x) => x.dni).filter(Boolean)) : null;
 };
+
+// Padrón con el DNI guardado en las personas que solo tenían nombre
+const conDnis = (personas: PersonaPadron[], asignados: Map<PersonaPadron, string>) =>
+  personas.map((p) => {
+    const dni = asignados.get(p);
+    return dni ? { ...p, dni } : p;
+  });
 
 // Sin Excel (o sin institución en el Excel) la lista se llama "Ingreso" y la fecha
 const defaultTitle = () => `Ingreso ${format(new Date(), "dd/MM/yyyy")}`;
@@ -291,10 +298,16 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   const [padron, setPadron] = useState<Padron | null>(null);
   const padronRef = useRef<Map<string, string> | null>(null);
   const padronMap = useMemo(
-    () => (padron ? new Map(padron.personas.map((p) => [p.dni, p.nombre])) : null),
+    () =>
+      padron
+        ? new Map(padron.personas.filter((p) => p.dni).map((p) => [p.dni, p.nombre]))
+        : null,
     [padron]
   );
   padronRef.current = padronMap;
+  // Lista completa (también las personas sin DNI, que se validan por nombre)
+  const padronDatosRef = useRef<Padron | null>(null);
+  padronDatosRef.current = padron;
   const padronSet = useMemo(
     () => (padronMap ? new Set(padronMap.keys()) : null),
     [padronMap]
@@ -436,6 +449,57 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       return;
     }
     if (openListRef.current?.id === listId) setPadron(toPadron(data));
+  };
+
+  // DNI que no está en la lista: se busca por nombre y apellidos entre las
+  // personas del Excel que no traían DNI. Si coincide, se acepta y su DNI se
+  // guarda en la lista. Devuelve los DNI que quedaron validados.
+  const validarPorNombre = async (pares: { dni: string; nombre: string }[]) => {
+    const list = openListRef.current;
+    const actual = padronDatosRef.current;
+    if (!list || !actual || !pares.length) return new Set<string>();
+
+    // Se parte del padrón más reciente (otro equipo pudo asignar DNIs)
+    const { data } = await supabase
+      .from("scan_lists")
+      .select("padron, padron_archivo")
+      .eq("id", list.id)
+      .maybeSingle();
+    const base = toPadron(data) ?? actual;
+
+    const asignados = new Map<PersonaPadron, string>();
+    const validados = new Set<string>();
+    for (const { dni, nombre } of pares) {
+      if (base.personas.some((p) => p.dni === dni)) {
+        validados.add(dni);
+        continue;
+      }
+      const libres = base.personas.filter((p) => !p.dni && !asignados.has(p));
+      const match = buscarPorNombre(libres, nombre);
+      if (match) {
+        asignados.set(match, dni);
+        validados.add(dni);
+      }
+    }
+    if (!asignados.size) {
+      if (base !== actual) setPadron(base);
+      return validados;
+    }
+
+    const next: Padron = { ...base, personas: conDnis(base.personas, asignados) };
+    const { error } = await supabase
+      .from("scan_lists")
+      .update({ padron: next.personas })
+      .eq("id", list.id);
+    if (error) {
+      console.error(error);
+      toast.error("No se pudo guardar el DNI en la lista: " + error.message);
+    }
+    // Se fija ya para que las siguientes lecturas lo vean
+    padronDatosRef.current = next;
+    padronRef.current = new Map(next.personas.filter((p) => p.dni).map((p) => [p.dni, p.nombre]));
+    setPadron(next);
+    return validados;
   };
 
   const addRecord = (rec: Record) =>
@@ -697,13 +761,18 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       }
 
       await playBeep();
-      const fuera = !!padronRef.current && !padronRef.current.has(dni);
+      let porNombre = false;
+      if (padronRef.current && !padronRef.current.has(dni)) {
+        porNombre = (await validarPorNombre([{ dni, nombre }])).has(dni);
+      }
+      const fuera = !!padronRef.current && !padronRef.current.has(dni) && !porNombre;
       setLastRead({ raw, dni, nombre, fuente, estado: fuera ? "fuera" : "ok" });
       setLastAddedId(row.id);
       addRecord(toRecord(row));
       bumpRead();
 
       if (fuera) toast.error(`No está en la lista: ${nombre}`);
+      else if (porNombre) toast.success(`Validado por nombre: ${nombre}. Su DNI quedó guardado en la lista.`);
       else toast.success(`Agregado: ${nombre}`);
 
       // Llega un día antes de la fecha del campamento
@@ -964,9 +1033,20 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     try {
       const parsed = await parsePadronFile(file);
       if (parsed.personas.length === 0) {
-        toast.error(`No se encontraron DNI en "${file.name}"`);
+        toast.error(`No se encontraron DNI ni nombres en "${file.name}"`);
         return;
       }
+      // Los ya registrados que no están por DNI se buscan por nombre entre los
+      // que no traen DNI en el Excel, y se les guarda el DNI
+      const dnisExcel = new Set(parsed.personas.map((p) => p.dni).filter(Boolean));
+      const asignados = new Map<PersonaPadron, string>();
+      for (const r of recordsRef.current) {
+        if (dnisExcel.has(r.dni_number)) continue;
+        const libres = parsed.personas.filter((p) => !p.dni && !asignados.has(p));
+        const match = buscarPorNombre(libres, r.full_name ?? "");
+        if (match) asignados.set(match, r.dni_number);
+      }
+      if (asignados.size) parsed.personas = conDnis(parsed.personas, asignados);
       // Cabecera del Excel: el título es la institución y el horario sale de
       // "Fecha Campamento" (dos fechas = estadía, una = full day). Se toman
       // siempre del archivo, aunque la lista ya exista.
@@ -999,11 +1079,17 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
       if (tomados.length) toast(`Del Excel: ${tomados.join(" y ")}.`);
       // padronRef se actualiza en el próximo render; se fija ya para que la
       // lectura en espera se valide contra la lista recién subida
-      padronRef.current = new Map(parsed.personas.map((p) => [p.dni, p.nombre]));
+      padronRef.current = new Map(
+        parsed.personas.filter((p) => p.dni).map((p) => [p.dni, p.nombre])
+      );
+      padronDatosRef.current = parsed;
       const sinNombre = parsed.personas.filter((p) => !p.nombre).length;
+      const sinDni = parsed.personas.filter((p) => !p.dni).length;
       toast.success(
         `Lista cargada: ${parsed.personas.length} personas` +
-          (sinNombre ? ` (${sinNombre} sin nombre)` : "")
+          (sinNombre ? ` (${sinNombre} sin nombre)` : "") +
+          (sinDni ? `. ${sinDni} sin DNI: se validarán por nombre y apellidos al escanear` : "") +
+          (asignados.size ? `. ${asignados.size} ya registrados se validaron por nombre` : "")
       );
       flushPendingCode();
     } catch (err: any) {
@@ -1066,15 +1152,17 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
   );
 
   const padronStats = useMemo(() => {
-    if (!padronSet) return null;
+    if (!padronSet || !padron) return null;
     const enLista = currentRecords.filter((r) => padronSet.has(r.dni_number)).length;
+    // El total incluye a los que aún no tienen DNI (solo nombre en el Excel)
+    const total = padronSet.size + padron.personas.filter((p) => !p.dni).length;
     return {
       enLista,
       fuera: currentRecords.length - enLista,
-      faltan: padronSet.size - enLista,
-      total: padronSet.size,
+      faltan: total - enLista,
+      total,
     };
-  }, [currentRecords, padronSet]);
+  }, [currentRecords, padronSet, padron]);
 
   const filteredLists = useMemo(() => {
     const q = listSearch.trim().toLowerCase();
@@ -1895,7 +1983,7 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                             title="Invitados que llegaron"
                           >
                             <CircleCheck className="h-4 w-4" />
-                            {enLista}/{dnis.size}
+                            {enLista}/{dnis.size + (toPadron(list)?.personas.filter((p) => !p.dni).length ?? 0)}
                           </span>
                         )}
                         <span
