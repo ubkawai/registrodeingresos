@@ -14,9 +14,13 @@ interface ScannerProps {
   onScanSuccess: (dni: string, fullName: string) => void;
   isActive: boolean;
   onClose: () => void;
+  // La cámara sigue abierta tras cada lectura (ingreso de varias personas).
+  // El mismo DNI no se vuelve a enviar mientras siga frente a la cámara.
+  continuo?: boolean;
 }
 
-export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
+export const Scanner = ({ onScanSuccess, isActive, onClose, continuo = false }: ScannerProps) => {
+  const ultimoDniRef = useRef<{ dni: string; at: number } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
@@ -194,7 +198,17 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
 
       // Un código que no trae un DNI (p. ej. otro código del carné) se ignora
       // y se sigue buscando.
-      if (!extractDniFromBarcode(text)) return;
+      const dniLeido = extractDniFromBarcode(text);
+      if (!dniLeido) return;
+
+      if (continuo) {
+        const ultimo = ultimoDniRef.current;
+        if (ultimo && ultimo.dni === dniLeido && now - ultimo.at < 5000) {
+          ultimo.at = now; // sigue frente a la cámara
+          return;
+        }
+        ultimoDniRef.current = { dni: dniLeido, at: now };
+      }
 
       vibrate();
       playBeep();
@@ -226,6 +240,10 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
         return;
       }
 
+      if (continuo) {
+        onScanSuccess(dni, fullName);
+        return;
+      }
       stopScanner();
       onScanSuccess(dni, fullName);
       toast.success("DNI leído correctamente");
@@ -299,6 +317,11 @@ export const Scanner = ({ onScanSuccess, isActive, onClose }: ScannerProps) => {
         <p className="text-sm opacity-80">
           Enfoca el código de barras del DNI, de cerca y con buena luz
         </p>
+        {continuo && (
+          <p className="mt-1 text-xs opacity-60">
+            La cámara sigue abierta: pasa los DNI uno tras otro y cierra con la X al terminar
+          </p>
+        )}
       </div>
     </div>
   );

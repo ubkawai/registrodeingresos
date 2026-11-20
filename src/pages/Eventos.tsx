@@ -75,7 +75,9 @@ import {
   Flag,
   BedDouble,
   CalendarDays,
+  Camera,
 } from "lucide-react";
+import { Scanner } from "@/components/Scanner";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -916,6 +918,12 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
     enabled: !!session && view === "registro" && !askPadron && !askLugar && !finalizarOpen,
   });
 
+  // Cámara del celular o la laptop. Queda abierta para leer varios DNI; se
+  // oculta mientras se pide el destino o la lista y vuelve al cerrarlos.
+  const [camara, setCamara] = useState(false);
+  const camaraActiva =
+    camara && view === "registro" && !askPadron && !askLugar && !finalizarOpen;
+
   // Mantiene el foco en el campo del lector
   useEffect(() => {
     if (session && view === "registro") focusScan();
@@ -1487,6 +1495,24 @@ const Eventos = ({ session, role, onCambiarModulo }: EventosProps) => {
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </form>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 h-11 w-full rounded-md"
+                  onClick={() => setCamara(true)}
+                >
+                  <Camera className="mr-2 h-4 w-4" />
+                  Escanear con la cámara
+                </Button>
+                <Scanner
+                  isActive={camaraActiva}
+                  continuo
+                  onClose={() => {
+                    setCamara(false);
+                    focusScan();
+                  }}
+                  onScanSuccess={(dni) => enqueueCode(dni)}
+                />
               </div>
 
               {bungalowsLista.length > 0 && (
