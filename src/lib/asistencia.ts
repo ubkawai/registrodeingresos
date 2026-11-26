@@ -162,9 +162,11 @@ export const resumirJornada = (j: Jornada): ResumenJornada => {
       ? minutosEntre(entrada.marcado_at, salida.marcado_at) - (refrigerioMin ?? 0)
       : null;
 
-  // Permanencia después del horario de salida (art. 7: se presume sobretiempo)
-  const sobretiempoMin =
-    salida && j.programada_fin
+  // Permanencia después del horario de salida (art. 7: se presume sobretiempo).
+  // En un reingreso (volvió a entrar tras cumplir su turno) todo es sobretiempo.
+  const sobretiempoMin = j.reingreso
+    ? Math.max(0, Math.floor(trabajadoMin ?? 0))
+    : salida && j.programada_fin
       ? Math.max(0, Math.floor(minutosEntre(j.programada_fin, salida.marcado_at)))
       : 0;
 
@@ -174,6 +176,7 @@ export const resumirJornada = (j: Jornada): ResumenJornada => {
       : 0;
 
   const observaciones: string[] = [];
+  if (j.reingreso) observaciones.push("Reingreso: todo el tiempo cuenta como horas extras");
   if (!entrada) observaciones.push("Sin entrada válida");
   if (entrada && !salida) observaciones.push("Sin salida");
   if (inicioRef && !finRef) observaciones.push("Refrigerio sin cierre");

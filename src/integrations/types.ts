@@ -84,6 +84,7 @@ export type Database = {
           programada_fin: string | null
           programada_inicio: string | null
           refrigerio_min: number
+          reingreso: boolean
           tolerancia_min: number
           turno_id: string | null
           turno_nombre: string | null
@@ -97,6 +98,7 @@ export type Database = {
           programada_fin?: string | null
           programada_inicio?: string | null
           refrigerio_min?: number
+          reingreso?: boolean
           tolerancia_min?: number
           turno_id?: string | null
           turno_nombre?: string | null
@@ -110,6 +112,7 @@ export type Database = {
           programada_fin?: string | null
           programada_inicio?: string | null
           refrigerio_min?: number
+          reingreso?: boolean
           tolerancia_min?: number
           turno_id?: string | null
           turno_nombre?: string | null
