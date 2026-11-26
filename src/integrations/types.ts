@@ -85,6 +85,7 @@ export type Database = {
           programada_inicio: string | null
           refrigerio_min: number
           reingreso: boolean
+          descanso_trabajado: string | null
           tolerancia_min: number
           turno_id: string | null
           turno_nombre: string | null
@@ -99,6 +100,7 @@ export type Database = {
           programada_inicio?: string | null
           refrigerio_min?: number
           reingreso?: boolean
+          descanso_trabajado?: string | null
           tolerancia_min?: number
           turno_id?: string | null
           turno_nombre?: string | null
@@ -113,6 +115,7 @@ export type Database = {
           programada_inicio?: string | null
           refrigerio_min?: number
           reingreso?: boolean
+          descanso_trabajado?: string | null
           tolerancia_min?: number
           turno_id?: string | null
           turno_nombre?: string | null
@@ -599,7 +602,7 @@ export type Database = {
       es_rrhh: { Args: Record<PropertyKey, never>; Returns: boolean }
       estado_puerta: { Args: { p_centro_id: string }; Returns: Json }
       marcar_asistencia: {
-        Args: { p_dni: string; p_tipo?: string }
+        Args: { p_dni: string; p_tipo?: string; p_descanso?: string }
         Returns: Json
       }
       mi_rol: { Args: Record<PropertyKey, never>; Returns: string }

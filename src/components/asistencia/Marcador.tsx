@@ -6,8 +6,10 @@ import { Label } from "@/components/ui/label";
 import { Scanner } from "@/components/Scanner";
 import {
   ArrowRight,
+  CalendarSync,
   Camera,
   CircleX,
+  Clock,
   Coffee,
   Loader2,
   LogIn,
@@ -23,9 +25,11 @@ import { cn } from "@/lib/utils";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { extractDniFromBarcode } from "@/lib/dni";
 import {
+  MODO_DESCANSO,
   TIPO_CORTO,
   TIPO_LABEL,
   horaDe,
+  type ModoDescanso,
   type MarcaNo,
   type MarcaOk,
   type MarcaResult,
@@ -36,20 +40,31 @@ import {
 // servidor decide si es entrada, refrigerio o salida y pone la hora.
 
 type Eleccion = Extract<MarcaNo, { motivo: "elegir" }>;
-type Rechazo = MarcaNo | { ok: false; motivo: "error"; mensaje: string };
+type EleccionDescanso = Extract<MarcaNo, { motivo: "descanso" }>;
+type Rechazo =
+  | Exclude<MarcaNo, EleccionDescanso>
+  | { ok: false; motivo: "error"; mensaje: string };
 
 type Pantalla =
   | { k: "espera" }
   | { k: "cargando"; dni: string }
   | { k: "elegir"; res: Eleccion }
+  | { k: "descanso"; res: EleccionDescanso }
   | { k: "resultado"; res: MarcaResult | Rechazo };
 
 const isOk = (r: MarcaResult | Rechazo): r is MarcaOk => r.ok === true;
 
 type Reciente = { id: string; nombre: string; tipo: TipoMarca; at: string };
 
-const SEG_RESULTADO = 6;
-const SEG_ELEGIR = 8;
+const SEG_RESULTADO = 10;
+const SEG_ELEGIR = 12;
+// Elegir cómo se toma el día de descanso necesita más tiempo para leer
+const SEG_DESCANSO = 40;
+
+const ICONO_DESCANSO: Record<ModoDescanso, { cls: string; icon: typeof LogIn }> = {
+  horas_extras: { cls: "bg-success text-white", icon: Clock },
+  cambio_descanso: { cls: "bg-accent text-accent-foreground", icon: CalendarSync },
+};
 
 const isTouch =
   typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
@@ -101,11 +116,12 @@ export const Marcador = () => {
     setSeq((n) => n + 1);
   };
 
-  const marcar = async (dni: string, tipo?: TipoMarca) => {
+  const marcar = async (dni: string, tipo?: TipoMarca, descanso?: ModoDescanso) => {
     mostrar({ k: "cargando", dni });
     const { data, error } = await supabase.rpc("marcar_asistencia", {
       p_dni: dni,
       ...(tipo ? { p_tipo: tipo } : {}),
+      ...(descanso ? { p_descanso: descanso } : {}),
     });
 
     if (error) {
@@ -129,6 +145,10 @@ export const Marcador = () => {
       mostrar({ k: "elegir", res: res as Eleccion });
       return;
     }
+    if (!res.ok && (res as MarcaNo).motivo === "descanso") {
+      mostrar({ k: "descanso", res: res as EleccionDescanso });
+      return;
+    }
     if (isOk(res)) {
       beep();
       setRecientes((prev) =>
@@ -145,6 +165,10 @@ export const Marcador = () => {
     const actual = pantallaRef.current;
     if (actual.k === "elegir") {
       await marcar(actual.res.dni, actual.res.sugerida);
+      if (dni === actual.res.dni) return;
+    }
+    if (actual.k === "descanso") {
+      await marcar(actual.res.dni, undefined, actual.res.sugerida);
       if (dni === actual.res.dni) return;
     }
     if (!dni) {
@@ -169,12 +193,22 @@ export const Marcador = () => {
     focusScan();
   };
 
+  const elegirDescanso = (modo: ModoDescanso) => {
+    const actual = pantallaRef.current;
+    if (actual.k !== "descanso") return;
+    queueRef.current = queueRef.current
+      .then(() => marcar(actual.res.dni, undefined, modo))
+      .catch(console.error);
+    focusScan();
+  };
+
   useBarcodeScanner(encolar, { enabled: !camara });
 
   // Cuenta regresiva: vuelve a la espera o confirma la opción sugerida
   useEffect(() => {
-    if (pantalla.k !== "resultado" && pantalla.k !== "elegir") return;
-    const total = pantalla.k === "elegir" ? SEG_ELEGIR : SEG_RESULTADO;
+    if (pantalla.k !== "resultado" && pantalla.k !== "elegir" && pantalla.k !== "descanso") return;
+    const total =
+      pantalla.k === "elegir" ? SEG_ELEGIR : pantalla.k === "descanso" ? SEG_DESCANSO : SEG_RESULTADO;
     const fin = Date.now() + total * 1000;
     setRestante(total);
     const id = window.setInterval(() => {
@@ -183,6 +217,7 @@ export const Marcador = () => {
       if (s > 0) return;
       window.clearInterval(id);
       if (pantalla.k === "elegir") elegir(pantalla.res.sugerida);
+      else if (pantalla.k === "descanso") elegirDescanso(pantalla.res.sugerida);
       else setPantalla({ k: "espera" });
     }, 250);
     return () => window.clearInterval(id);
@@ -279,7 +314,13 @@ export const Marcador = () => {
 
       {/* ================== Letrero ================== */}
       <div className="min-w-0">
-        <Letrero key={seq} pantalla={pantalla} restante={restante} onElegir={elegir} />
+        <Letrero
+          key={seq}
+          pantalla={pantalla}
+          restante={restante}
+          onElegir={elegir}
+          onElegirDescanso={elegirDescanso}
+        />
       </div>
 
       <Scanner
@@ -301,10 +342,12 @@ const Letrero = ({
   pantalla,
   restante,
   onElegir,
+  onElegirDescanso,
 }: {
   pantalla: Pantalla;
   restante: number;
   onElegir: (t: TipoMarca) => void;
+  onElegirDescanso: (m: ModoDescanso) => void;
 }) => {
   const base = "min-h-[320px] rounded-2xl px-6 py-6 sm:px-8 sm:py-8";
 
@@ -369,6 +412,53 @@ const Letrero = ({
         </div>
         <p className="mt-4 text-sm text-muted-foreground">
           Toca una opción o vuelve a escanear para confirmar la resaltada.
+        </p>
+      </div>
+    );
+  }
+
+  if (pantalla.k === "descanso") {
+    const { res } = pantalla;
+    return (
+      <div className={cn(base, "animate-stamp border-2 border-warning bg-card")} role="status">
+        <p className="flex items-center gap-2 text-base font-semibold text-muted-foreground">
+          <TriangleAlert className="h-5 w-5 text-warning" />
+          Hoy es su día de descanso. ¿Cómo se toma este día?
+        </p>
+        <p className="font-sign mt-2 break-words text-4xl font-extrabold leading-[0.95] sm:text-5xl">
+          {res.nombre}
+        </p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          {res.opciones.map((m) => {
+            const { icon: Icon, cls } = ICONO_DESCANSO[m];
+            const sugerida = m === res.sugerida;
+            return (
+              <button
+                key={m}
+                onClick={() => onElegirDescanso(m)}
+                className={cn(
+                  "flex min-h-[112px] flex-col items-start justify-center rounded-xl px-5 py-4 text-left transition-transform active:scale-[0.98]",
+                  cls,
+                  !sugerida && "opacity-80"
+                )}
+              >
+                <span className="flex items-center gap-2 text-2xl font-bold">
+                  <Icon className="h-6 w-6" />
+                  {MODO_DESCANSO[m].titulo}
+                </span>
+                <span className="mt-1 text-sm font-medium opacity-90">{MODO_DESCANSO[m].detalle}</span>
+                {sugerida && (
+                  <span className="mt-1 text-sm font-semibold opacity-90">
+                    Se elegirá en {restante} s
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-4 text-sm text-muted-foreground">
+          Toca una opción o vuelve a escanear para confirmar la resaltada. Se registra la entrada
+          con la hora de ahora.
         </p>
       </div>
     );

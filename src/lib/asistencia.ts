@@ -66,9 +66,32 @@ export type MarcaNo =
       nombre: string;
       opciones: TipoMarca[];
       sugerida: TipoMarca;
+    }
+  | {
+      // Entrada en su día de descanso: se elige cómo se toma ese día
+      ok: false;
+      motivo: "descanso";
+      dni: string;
+      nombre: string;
+      opciones: ModoDescanso[];
+      sugerida: ModoDescanso;
     };
 
 export type MarcaResult = MarcaOk | MarcaNo;
+
+// ================== Día de descanso trabajado ==================
+export type ModoDescanso = "horas_extras" | "cambio_descanso";
+
+export const MODO_DESCANSO: Record<ModoDescanso, { titulo: string; detalle: string }> = {
+  horas_extras: {
+    titulo: "Horas extras",
+    detalle: "Todo el tiempo que trabaje hoy cuenta como sobretiempo",
+  },
+  cambio_descanso: {
+    titulo: "Cambio de día de descanso",
+    detalle: "Hoy es una jornada normal de 8 h; el descanso pasa a otro día",
+  },
+};
 
 // ================== Horas ==================
 // "06:00:00" -> "06:00"
@@ -163,8 +186,9 @@ export const resumirJornada = (j: Jornada): ResumenJornada => {
       : null;
 
   // Permanencia después del horario de salida (art. 7: se presume sobretiempo).
-  // En un reingreso (volvió a entrar tras cumplir su turno) todo es sobretiempo.
-  const sobretiempoMin = j.reingreso
+  // En un reingreso (volvió a entrar tras cumplir su turno) o en un descanso
+  // trabajado como horas extras, todo es sobretiempo.
+  const sobretiempoMin = j.reingreso || j.descanso_trabajado === "horas_extras"
     ? Math.max(0, Math.floor(trabajadoMin ?? 0))
     : salida && j.programada_fin
       ? Math.max(0, Math.floor(minutosEntre(j.programada_fin, salida.marcado_at)))
@@ -177,6 +201,10 @@ export const resumirJornada = (j: Jornada): ResumenJornada => {
 
   const observaciones: string[] = [];
   if (j.reingreso) observaciones.push("Reingreso: todo el tiempo cuenta como horas extras");
+  if (j.descanso_trabajado === "horas_extras")
+    observaciones.push("Trabajó en su descanso: todo el tiempo cuenta como horas extras");
+  if (j.descanso_trabajado === "cambio_descanso")
+    observaciones.push("Cambio de día de descanso: jornada de 8 h (programar el descanso en otro día)");
   if (!entrada) observaciones.push("Sin entrada válida");
   if (entrada && !salida) observaciones.push("Sin salida");
   if (inicioRef && !finRef) observaciones.push("Refrigerio sin cierre");
